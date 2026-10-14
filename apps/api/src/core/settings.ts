@@ -18,6 +18,7 @@ export async function saveSetting(key: string, value: Prisma.InputJsonValue, enc
 export async function credentials() {
   return {
     partnerKey: await setting('secret.partnerKey', env.PARTNER_API_KEY),
+    expayApiKey: await setting('secret.expayApiKey', env.EXPAY_API_KEY),
     mpToken: await setting('secret.mpToken', env.MP_ACCESS_TOKEN),
     mpWebhookSecret: await setting('secret.mpWebhookSecret', env.MP_WEBHOOK_SECRET),
   };

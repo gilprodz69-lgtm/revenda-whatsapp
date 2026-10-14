@@ -55,6 +55,24 @@ if [[ ! -f .env ]]; then
 		printf '%s' "$admin_password" >secrets/admin-password
 		unset admin_password confirm_password
 	fi
+	for integration in partner expay; do
+		file="secrets/$integration-api-key"
+		if [[ ! -f "$file" ]]; then
+			prompt_password integration_key "Chave de API $integration (Enter para configurar depois no painel): "
+			minimum=16
+			maximum=500
+			if [[ "$integration" == partner ]]; then
+				minimum=20
+				maximum=300
+			fi
+			[[ -z "$integration_key" || (${#integration_key} -ge $minimum && ${#integration_key} -le $maximum) ]] || error "Chave deve ter entre $minimum e $maximum caracteres."
+			printf '%s' "$integration_key" >"$file"
+			unset integration_key
+		fi
+	done
+	EXPAY_STORE_ID=${EXPAY_STORE_ID:-}
+	prompt_value EXPAY_STORE_ID 'ID da loja Expay (opcional, Enter para usar o merchant da chave): '
+	[[ -z "$EXPAY_STORE_ID" || "$EXPAY_STORE_ID" =~ ^[a-zA-Z0-9_-]{1,255}$ ]] || error 'ID da loja Expay inválido.'
 	POSTGRES_PASSWORD=$(openssl rand -hex 32)
 	DB_PASSWORD=$(openssl rand -hex 32)
 	EVOLUTION_DB_PASSWORD=$(openssl rand -hex 32)
@@ -85,6 +103,8 @@ PARTNER_API_KEY=
 PARTNER_REQUESTS_PER_MINUTE=60
 PARTNER_ORDERS_PER_MINUTE=10
 PIX_GATEWAY=disabled
+EXPAY_API_KEY=
+EXPAY_STORE_ID=$EXPAY_STORE_ID
 MP_ACCESS_TOKEN=
 MP_WEBHOOK_SECRET=
 ADMIN_EMAIL=$ADMIN_EMAIL
@@ -95,6 +115,12 @@ chmod 0600 .env
 [[ -f secrets/admin-password ]] || error 'Arquivo secrets/admin-password ausente. Reponha a senha inicial original ou uma senha protegida; contas existentes não serão sobrescritas.'
 chmod 0640 secrets/admin-password
 chown root:1000 secrets/admin-password
+for integration in partner expay; do
+	file="secrets/$integration-api-key"
+	[[ -f "$file" ]] || : >"$file"
+	chmod 0640 "$file"
+	chown root:1000 "$file"
+done
 [[ -f secrets/backup-passphrase ]] || openssl rand -hex 48 >secrets/backup-passphrase
 chmod 0600 secrets/backup-passphrase
 load_env
@@ -142,5 +168,6 @@ else
 	printf 'Após propagar o DNS, execute: sudo bash "%s/scripts/healthcheck.sh"\n' "$ROOT_DIR"
 	echo 'O proxy tenta emitir HTTPS novamente sozinho; não é necessário reinstalar.'
 fi
-echo 'Entre com a senha definida, configure Partner API, gateway e cotação, sincronize/autorize os produtos e conecte o WhatsApp.'
+echo 'Entre com a senha definida, confira Partner/Expay, cotação e preços, sincronize/autorize os produtos e conecte o WhatsApp.'
+echo "Webhook opcional da loja Expay: https://$APP_DOMAIN/webhooks/pix/expay. A consulta automática também confirma os pagamentos."
 echo 'Guarde secrets/backup-passphrase e a ENCRYPTION_KEY do .env em local separado e protegido. Nenhum segredo foi exibido.'

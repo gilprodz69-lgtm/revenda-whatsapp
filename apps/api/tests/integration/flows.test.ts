@@ -499,6 +499,165 @@ describe('Catálogo, webhooks e fluxo completo', () => {
     expect(await db.ledgerEntry.count({ where: { kind: 'DEPOSIT' } })).toBe(1);
   });
 });
+describe('Expay Brasil', () => {
+  async function configured() {
+    await saveSetting('pix.gateway', 'expay');
+    await saveSetting('secret.expayApiKey', 'TEST-EXPAY-KEY-NEVER-REAL', true);
+  }
+  it('cria Pix pela API atual e credita uma única vez com reconciliações concorrentes', async () => {
+    await configured();
+    const gatewayId = randomUUID();
+    let reference = '',
+      status = 'pending';
+    const fetch = vi.fn(async (_url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') reference = JSON.parse(String(options.body)).reference;
+      return new Response(
+        JSON.stringify({
+          charge_id: gatewayId,
+          reference,
+          amount: 20,
+          currency: 'BRL',
+          payment_method: 'pix',
+          status,
+          pix_data: { copy_paste: 'PIX-EXPAY-TEST' },
+          expires_at: null,
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetch);
+    const key = randomUUID();
+    const payment = await createDeposit(
+      customerId,
+      'store',
+      '20',
+      { email: 'test@example.com', cpf: '52998224725' },
+      key,
+    );
+    expect(payment.gateway).toBe('expay');
+    expect(payment.expiresAt).toBeNull();
+    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'Idempotency-Key': key,
+      'X-API-Key': 'TEST-EXPAY-KEY-NEVER-REAL',
+    });
+    status = 'paid';
+    await Promise.all([reconcilePayment(gatewayId), reconcilePayment(gatewayId)]);
+    expect(
+      (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+    ).toBe('20.00');
+    expect(await db.ledgerEntry.count({ where: { kind: 'DEPOSIT' } })).toBe(1);
+    status = 'refunded';
+    await reconcilePayment(gatewayId);
+    expect((await db.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe(
+      'REVIEW',
+    );
+    expect((await db.customer.findUniqueOrThrow({ where: { id: customerId } })).blocked).toBe(true);
+  });
+  it.each(['amount', 'reference', 'currency', 'payment_method'])(
+    'não credita cobrança Expay com %s divergente',
+    async (field) => {
+      await configured();
+      const id = randomUUID(),
+        gatewayId = randomUUID();
+      await db.payment.create({
+        data: {
+          id,
+          customerId,
+          instanceName: 'store',
+          idempotencyKey: randomUUID(),
+          gateway: 'expay',
+          gatewayId,
+          amountBrl: '20',
+          encryptedRequestBody: encrypt('{}'),
+        },
+      });
+      const charge: Record<string, unknown> = {
+        charge_id: gatewayId,
+        reference: id,
+        amount: 20,
+        currency: 'BRL',
+        payment_method: 'pix',
+        status: 'paid',
+      };
+      charge[field] =
+        field === 'amount'
+          ? 200
+          : field === 'reference'
+            ? randomUUID()
+            : field === 'currency'
+              ? 'USD'
+              : 'boleto';
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(charge), { status: 200 })),
+      );
+      await expect(reconcilePayment(gatewayId)).rejects.toThrow('divergente');
+      expect(await db.ledgerEntry.count()).toBe(0);
+    },
+  );
+  it('webhook público não aprova pelo corpo e ignora cobranças desconhecidas', async () => {
+    await configured();
+    const id = randomUUID(),
+      gatewayId = randomUUID();
+    await db.payment.create({
+      data: {
+        id,
+        customerId,
+        instanceName: 'store',
+        idempotencyKey: randomUUID(),
+        gateway: 'expay',
+        gatewayId,
+        amountBrl: '20',
+        status: 'PENDING',
+        encryptedRequestBody: encrypt('{}'),
+      },
+    });
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: gatewayId,
+            reference: id,
+            amount: 20,
+            currency: 'BRL',
+            payment_method: 'pix',
+            status: 'pending',
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const app = await buildApp();
+    try {
+      for (let i = 0; i < 2; i++)
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: '/webhooks/pix/expay',
+              payload: { charge_id: gatewayId, status: 'paid', amount: 10000 },
+            })
+          ).statusCode,
+        ).toBe(202);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/webhooks/pix/expay',
+            payload: { charge_id: randomUUID(), status: 'paid' },
+          })
+        ).statusCode,
+      ).toBe(202);
+      expect(await db.webhookEvent.count()).toBe(1);
+      expect(fetch).not.toHaveBeenCalled();
+      await reconcilePayment(gatewayId);
+      expect(await db.ledgerEntry.count()).toBe(0);
+      expect((await db.payment.findUniqueOrThrow({ where: { id } })).status).toBe('PENDING');
+    } finally {
+      await app.close();
+    }
+  });
+});
 describe('Autenticação, filas e proteção de webhooks financeiros', () => {
   it('retorna dashboard por período e filtros de catálogo com preços em Decimal', async () => {
     await db.admin.create({

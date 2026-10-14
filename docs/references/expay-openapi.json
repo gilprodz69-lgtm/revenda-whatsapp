@@ -1,0 +1,2681 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "ExPay Gateway Core API",
+        "description": "API de cobranças do ExPay - criação e gestão de pagamentos PIX, boleto e cartão de crédito.\n\n## Autenticação\nTodos os endpoints de negócio exigem o header `X-API-Key` com a chave do merchant.\nA chave é provisionada no painel ExPay e identifica o merchant em todas as chamadas.\n\n## Idempotência\nEm `POST /charges`, envie o header `Idempotency-Key` (string única por cobrança).\nRequisições repetidas com a mesma chave retornam a cobrança já criada, sem duplicar.\n\n## Rastreamento\nEnvie `X-Request-Id` em qualquer chamada para correlacionar logs. A resposta sempre\ndevolve esse header (gera um se não enviado).\n\n## Webhooks\nO gateway notifica a URL configurada da loja a cada mudança de status de cobrança\n(`charge.paid`, `charge.failed`, `charge.refunded`). As entregas ficam consultáveis\nem `/webhook-deliveries`.",
+        "contact": {
+            "name": "Suporte ExPay",
+            "email": "suporte@leventechnology.com"
+        },
+        "version": "1.0.0",
+        "x-logo": {
+            "url": "/logo-full-brand.svg",
+            "altText": "ExPay"
+        }
+    },
+    "servers": [
+        {
+            "url": "/api/v1",
+            "description": "API v1"
+        }
+    ],
+    "paths": {
+        "/accounts": {
+            "get": {
+                "tags": [
+                    "Sub-contas"
+                ],
+                "summary": "Listar sub-contas",
+                "description": "Lista sub-contas Transfeera com paginação e filtros opcionais por merchant, loja e status.",
+                "operationId": "listAccounts",
+                "parameters": [
+                    {
+                        "name": "merchant_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "maxLength": 255
+                        }
+                    },
+                    {
+                        "name": "store_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "maxLength": 255
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pending",
+                                "active",
+                                "blocked",
+                                "closed",
+                                "rejected"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 15,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lista paginada de sub-contas",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/Account"
+                                            }
+                                        },
+                                        "current_page": {
+                                            "type": "integer",
+                                            "example": 1
+                                        },
+                                        "last_page": {
+                                            "type": "integer",
+                                            "example": 3
+                                        },
+                                        "per_page": {
+                                            "type": "integer",
+                                            "example": 15
+                                        },
+                                        "total": {
+                                            "type": "integer",
+                                            "example": 42
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Sub-contas"
+                ],
+                "summary": "Criar sub-conta",
+                "description": "Cria uma sub-conta Transfeera vinculada a uma loja (multicontas) e, quando informado, sua chave PIX. A sub-conta nasce com status pending e precisa ser sincronizada para refletir a aprovação da Transfeera.",
+                "operationId": "createAccount",
+                "parameters": [
+                    {
+                        "name": "X-Request-Id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "customer_id"
+                                ],
+                                "properties": {
+                                    "customer_id": {
+                                        "description": "UUID do cliente dono da sub-conta",
+                                        "type": "string",
+                                        "format": "uuid",
+                                        "example": "019d997b-73a4-714d-a39a-447cdccdc8ef"
+                                    },
+                                    "merchant_id": {
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "merchant-001",
+                                        "nullable": true
+                                    },
+                                    "store_id": {
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    },
+                                    "tax_id": {
+                                        "description": "CPF/CNPJ do titular da sub-conta",
+                                        "type": "string",
+                                        "maxLength": 20,
+                                        "example": "12345678900",
+                                        "nullable": true
+                                    },
+                                    "external_id": {
+                                        "description": "Identificador externo do merchant",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    },
+                                    "pix_key_type": {
+                                        "description": "Tipo da chave PIX a criar junto com a sub-conta",
+                                        "type": "string",
+                                        "enum": [
+                                            "evp",
+                                            "cpf",
+                                            "cnpj",
+                                            "email",
+                                            "phone"
+                                        ],
+                                        "nullable": true
+                                    },
+                                    "pix_key_value": {
+                                        "description": "Valor da chave PIX (omitido quando pix_key_type=evp)",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Sub-conta criada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Account"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Sub-conta já existe ou erro de banco de dados",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação ou na criação da sub-conta na Transfeera",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/accounts/{account}": {
+            "get": {
+                "tags": [
+                    "Sub-contas"
+                ],
+                "summary": "Detalhar sub-conta",
+                "description": "Retorna os dados completos de uma sub-conta Transfeera pelo seu UUID.",
+                "operationId": "getAccount",
+                "parameters": [
+                    {
+                        "name": "account",
+                        "in": "path",
+                        "description": "UUID da sub-conta",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dados da sub-conta",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Account"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Sub-conta não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/accounts/{account}/sync": {
+            "post": {
+                "tags": [
+                    "Sub-contas"
+                ],
+                "summary": "Sincronizar sub-conta",
+                "description": "Consulta a Transfeera e atualiza o status local da sub-conta (pending, active, blocked, rejected etc.). Use após criar a sub-conta para refletir a aprovação do provedor.",
+                "operationId": "syncAccount",
+                "parameters": [
+                    {
+                        "name": "account",
+                        "in": "path",
+                        "description": "UUID da sub-conta",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sub-conta sincronizada com o status atualizado",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Account"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha ao sincronizar com a Transfeera",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Sub-conta não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/accounts/{account}/close": {
+            "post": {
+                "tags": [
+                    "Sub-contas"
+                ],
+                "summary": "Encerrar sub-conta",
+                "description": "Encerra uma sub-conta Transfeera. A sub-conta passa a ter status closed e não pode mais receber cobranças.",
+                "operationId": "closeAccount",
+                "parameters": [
+                    {
+                        "name": "account",
+                        "in": "path",
+                        "description": "UUID da sub-conta",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sub-conta encerrada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Account"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Sub-conta não pode ser encerrada (status inválido) ou falha na Transfeera",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Sub-conta não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/accounts/{account}/pix-key": {
+            "post": {
+                "tags": [
+                    "Sub-contas"
+                ],
+                "summary": "Criar chave PIX da sub-conta",
+                "description": "Cria uma chave PIX para uma sub-conta Transfeera já existente. Para o tipo evp a chave é gerada pelo provedor; para os demais tipos informe o valor no campo key.",
+                "operationId": "createAccountPixKey",
+                "parameters": [
+                    {
+                        "name": "account",
+                        "in": "path",
+                        "description": "UUID da sub-conta",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "type"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "description": "Tipo da chave PIX",
+                                        "type": "string",
+                                        "enum": [
+                                            "evp",
+                                            "cpf",
+                                            "cnpj",
+                                            "email",
+                                            "phone"
+                                        ],
+                                        "example": "evp"
+                                    },
+                                    "key": {
+                                        "description": "Valor da chave PIX. Omitido quando type=evp (o provedor gera a chave).",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Chave PIX criada para a sub-conta",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Account"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação ou na criação da chave PIX na Transfeera",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Sub-conta não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges": {
+            "get": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Listar cobranças",
+                "description": "Lista cobranças com paginação e filtros opcionais.",
+                "operationId": "listCharges",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pending",
+                                "paid",
+                                "failed",
+                                "refunded",
+                                "expired"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "payment_method",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pix",
+                                "boleto",
+                                "credit_card"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "reference",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "maxLength": 255
+                        }
+                    },
+                    {
+                        "name": "store_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "merchant_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 15,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lista paginada de cobranças",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "allOf": [
+                                        {
+                                            "$ref": "#/components/schemas/PaginationMeta"
+                                        },
+                                        {
+                                            "properties": {
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "$ref": "#/components/schemas/Charge"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Criar cobrança",
+                "description": "Cria uma cobrança PIX, boleto ou cartão de crédito. Envie o header Idempotency-Key para evitar duplicação em reenvios.",
+                "operationId": "createCharge",
+                "parameters": [
+                    {
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "description": "Chave única por cobrança - reenvios com a mesma chave retornam a cobrança original.",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "X-Request-Id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "amount",
+                                    "currency",
+                                    "payment_method"
+                                ],
+                                "properties": {
+                                    "amount": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "minimum": 0.01,
+                                        "example": 99.5
+                                    },
+                                    "currency": {
+                                        "type": "string",
+                                        "enum": [
+                                            "BRL"
+                                        ],
+                                        "example": "BRL"
+                                    },
+                                    "payment_method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pix",
+                                            "boleto",
+                                            "credit_card"
+                                        ],
+                                        "example": "pix"
+                                    },
+                                    "reference": {
+                                        "description": "Referência livre do merchant",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "inv-12345",
+                                        "nullable": true
+                                    },
+                                    "due_date": {
+                                        "description": "Vencimento (boleto). Não pode ser no passado.",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-06-01",
+                                        "nullable": true
+                                    },
+                                    "store_id": {
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    },
+                                    "merchant_id": {
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    },
+                                    "transfeera_account_id": {
+                                        "description": "Sub-conta Transfeera da loja (multicontas)",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    },
+                                    "customer": {
+                                        "properties": {
+                                            "name": {
+                                                "type": "string",
+                                                "maxLength": 255,
+                                                "example": "João Silva"
+                                            },
+                                            "document": {
+                                                "type": "string",
+                                                "maxLength": 20,
+                                                "example": "12345678900"
+                                            },
+                                            "email": {
+                                                "type": "string",
+                                                "format": "email",
+                                                "example": "cliente@example.com"
+                                            }
+                                        },
+                                        "type": "object",
+                                        "nullable": true
+                                    },
+                                    "card": {
+                                        "description": "Obrigatório quando payment_method=credit_card.",
+                                        "properties": {
+                                            "number": {
+                                                "type": "string",
+                                                "maxLength": 19,
+                                                "example": "4111111111111111"
+                                            },
+                                            "holder_name": {
+                                                "type": "string",
+                                                "maxLength": 255,
+                                                "example": "JOAO SILVA"
+                                            },
+                                            "expiration_month": {
+                                                "type": "string",
+                                                "maxLength": 2,
+                                                "example": "12"
+                                            },
+                                            "expiration_year": {
+                                                "type": "string",
+                                                "maxLength": 4,
+                                                "example": "2030"
+                                            },
+                                            "cvv": {
+                                                "type": "string",
+                                                "maxLength": 4,
+                                                "example": "123"
+                                            }
+                                        },
+                                        "type": "object",
+                                        "nullable": true
+                                    },
+                                    "installments": {
+                                        "description": "Parcelas (cartão de crédito)",
+                                        "type": "integer",
+                                        "maximum": 12,
+                                        "minimum": 1,
+                                        "example": 1,
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Cobrança criada. O header X-Gateway-Charge-Id traz o UUID.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Charge"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Sub-conta Transfeera em análise ou bloqueada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação ou na criação da cobrança",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges/aggregate": {
+            "get": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Agregar cobranças",
+                "description": "Agregação server-side de cobranças por período, status, método e loja - para relatórios e dashboards.",
+                "operationId": "aggregateCharges",
+                "parameters": [
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "store_ids",
+                        "in": "query",
+                        "description": "IDs de lojas separados por vírgula",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "merchant_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pending",
+                                "paid",
+                                "failed",
+                                "refunded",
+                                "expired"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "payment_method",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pix",
+                                "boleto",
+                                "credit_card"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "group_by",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "day",
+                            "enum": [
+                                "day",
+                                "week",
+                                "month"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Agregação de cobranças",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "total_count": {
+                                            "type": "integer",
+                                            "example": 150
+                                        },
+                                        "total_amount": {
+                                            "type": "number",
+                                            "format": "float",
+                                            "example": 15000.75
+                                        },
+                                        "by_status": {
+                                            "description": "Contagem e soma por status",
+                                            "type": "object"
+                                        },
+                                        "by_payment_method": {
+                                            "description": "Contagem e soma por método",
+                                            "type": "object"
+                                        },
+                                        "rows": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges/{charge}": {
+            "get": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Detalhar cobrança",
+                "description": "Retorna os dados completos de uma cobrança pelo seu UUID.",
+                "operationId": "getCharge",
+                "parameters": [
+                    {
+                        "name": "charge",
+                        "in": "path",
+                        "description": "UUID da cobrança",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dados da cobrança",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Charge"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Cobrança não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges/{charge}/boleto-pdf": {
+            "get": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Baixar PDF do boleto",
+                "description": "Retorna o PDF do boleto (stream binário). Só funciona para cobranças com payment_method=boleto.",
+                "operationId": "getChargeBoletoPdf",
+                "parameters": [
+                    {
+                        "name": "charge",
+                        "in": "path",
+                        "description": "UUID da cobrança",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "PDF do boleto",
+                        "content": {
+                            "application/pdf": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Cobrança não é boleto ou receivable_id ausente",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Cobrança não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges/{charge}/refund": {
+            "post": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Estornar cobrança",
+                "description": "Estorna uma cobrança paga. Sem o campo amount, estorna o valor total; com amount, faz estorno parcial. Só cobranças com status=paid podem ser estornadas.",
+                "operationId": "refundCharge",
+                "parameters": [
+                    {
+                        "name": "charge",
+                        "in": "path",
+                        "description": "UUID da cobrança",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "amount": {
+                                        "description": "Valor a estornar. Omitido = estorno total. Não pode exceder o valor da cobrança.",
+                                        "type": "number",
+                                        "format": "float",
+                                        "minimum": 0.01,
+                                        "example": 50,
+                                        "nullable": true
+                                    },
+                                    "reason": {
+                                        "type": "string",
+                                        "maxLength": 500,
+                                        "example": "Cobrança duplicada",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Cobrança estornada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Charge refunded successfully"
+                                        },
+                                        "charge": {
+                                            "$ref": "#/components/schemas/Charge"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Cobrança não pode ser estornada (status inválido, já estornada, valor inválido)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Cobrança não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges/{charge}/cancel": {
+            "post": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Cancelar cobrança",
+                "description": "Cancela uma cobrança pendente. Só funciona para cobranças com status=pending e provider=transfeera.",
+                "operationId": "cancelCharge",
+                "parameters": [
+                    {
+                        "name": "charge",
+                        "in": "path",
+                        "description": "UUID da cobrança",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cobrança cancelada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Charge canceled successfully"
+                                        },
+                                        "charge": {
+                                            "$ref": "#/components/schemas/Charge"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Cobrança não está pendente ou provider não suporta cancelamento",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Cobrança não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/charges/{charge}/upsell": {
+            "post": {
+                "tags": [
+                    "Cobranças"
+                ],
+                "summary": "Criar upsell de cobrança",
+                "description": "Cria uma nova cobrança vinculada a uma cobrança original (upsell pós-compra). A nova cobrança recebe parent_charge_id apontando para a original.",
+                "operationId": "upsellCharge",
+                "parameters": [
+                    {
+                        "name": "charge",
+                        "in": "path",
+                        "description": "UUID da cobrança original",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "amount",
+                                    "payment_method"
+                                ],
+                                "properties": {
+                                    "amount": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "minimum": 0.01,
+                                        "example": 29.9
+                                    },
+                                    "currency": {
+                                        "type": "string",
+                                        "enum": [
+                                            "BRL"
+                                        ],
+                                        "example": "BRL",
+                                        "nullable": true
+                                    },
+                                    "payment_method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pix",
+                                            "boleto",
+                                            "credit_card"
+                                        ],
+                                        "example": "pix"
+                                    },
+                                    "reference": {
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "nullable": true
+                                    },
+                                    "card": {
+                                        "description": "Obrigatório quando payment_method=credit_card",
+                                        "type": "object",
+                                        "nullable": true
+                                    },
+                                    "installments": {
+                                        "type": "integer",
+                                        "maximum": 12,
+                                        "minimum": 1,
+                                        "nullable": true
+                                    },
+                                    "metadata": {
+                                        "type": "object",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Upsell criado",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Upsell charge created"
+                                        },
+                                        "charge": {
+                                            "$ref": "#/components/schemas/Charge"
+                                        },
+                                        "parent_charge_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação ou criação",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Cobrança original não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/pix-automatico/mandatos": {
+            "post": {
+                "tags": [
+                    "PIX Automático"
+                ],
+                "summary": "Criar mandato PIX Automático",
+                "description": "Cria um mandato de autorização de PIX Automático para um pagador. Após autorizado pelo pagador, o mandato permite gerar cobranças recorrentes via POST /pix-automatico/cobrancas.",
+                "operationId": "createPixAutomaticoMandate",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "customer_name",
+                                    "customer_document",
+                                    "amount"
+                                ],
+                                "properties": {
+                                    "customer_name": {
+                                        "description": "Nome do pagador",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "João Silva"
+                                    },
+                                    "customer_document": {
+                                        "description": "CPF/CNPJ do pagador",
+                                        "type": "string",
+                                        "maxLength": 20,
+                                        "example": "12345678900"
+                                    },
+                                    "amount": {
+                                        "description": "Valor de cada cobrança recorrente",
+                                        "type": "number",
+                                        "format": "float",
+                                        "minimum": 0.01,
+                                        "example": 49.9
+                                    },
+                                    "frequency": {
+                                        "description": "Frequência da recorrência",
+                                        "type": "string",
+                                        "enum": [
+                                            "semanal",
+                                            "mensal",
+                                            "trimestral"
+                                        ],
+                                        "example": "mensal",
+                                        "nullable": true
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "maxLength": 500,
+                                        "example": "Assinatura mensal",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Mandato criado",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "mandate_id": {
+                                            "description": "Identificador do mandato",
+                                            "type": "string",
+                                            "example": "mandate-abc123"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação ou na criação do mandato",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/pix-automatico/mandatos/{mandateId}": {
+            "get": {
+                "tags": [
+                    "PIX Automático"
+                ],
+                "summary": "Consultar status do mandato",
+                "description": "Retorna a situação atual de um mandato de PIX Automático (pendente de autorização, autorizado, cancelado etc.).",
+                "operationId": "getPixAutomaticoMandateStatus",
+                "parameters": [
+                    {
+                        "name": "mandateId",
+                        "in": "path",
+                        "description": "Identificador do mandato",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status do mandato",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "mandate_id": {
+                                            "type": "string",
+                                            "example": "mandate-abc123"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "authorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Mandato não encontrado ou falha na consulta",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "PIX Automático"
+                ],
+                "summary": "Cancelar mandato PIX Automático",
+                "description": "Cancela um mandato de PIX Automático. Após o cancelamento o mandato não pode mais ser usado para gerar cobranças recorrentes.",
+                "operationId": "cancelPixAutomaticoMandate",
+                "parameters": [
+                    {
+                        "name": "mandateId",
+                        "in": "path",
+                        "description": "Identificador do mandato",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Mandato cancelado",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "mandate_id": {
+                                            "type": "string",
+                                            "example": "mandate-abc123"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "cancelled"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Mandato não encontrado ou falha no cancelamento",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/pix-automatico/cobrancas": {
+            "post": {
+                "tags": [
+                    "PIX Automático"
+                ],
+                "summary": "Cobrar via mandato PIX Automático",
+                "description": "Gera uma cobrança recorrente debitada de um mandato de PIX Automático já autorizado pelo pagador.",
+                "operationId": "createPixAutomaticoCharge",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "mandate_id",
+                                    "amount"
+                                ],
+                                "properties": {
+                                    "mandate_id": {
+                                        "description": "Identificador do mandato autorizado",
+                                        "type": "string",
+                                        "example": "mandate-abc123"
+                                    },
+                                    "amount": {
+                                        "description": "Valor a cobrar",
+                                        "type": "number",
+                                        "format": "float",
+                                        "minimum": 0.01,
+                                        "example": 49.9
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "maxLength": 500,
+                                        "example": "Mensalidade junho/2026",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Cobrança recorrente criada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "charge_id": {
+                                            "description": "Identificador da cobrança gerada",
+                                            "type": "string",
+                                            "example": "charge-xyz789"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação, mandato inválido/não autorizado ou falha na cobrança",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/reconciliation/runs": {
+            "get": {
+                "tags": [
+                    "Conciliação"
+                ],
+                "summary": "Listar execuções de conciliação",
+                "description": "Lista as execuções (runs) de conciliação com paginação e filtros opcionais por provedor, status e período.",
+                "operationId": "listReconciliationRuns",
+                "parameters": [
+                    {
+                        "name": "provider",
+                        "in": "query",
+                        "description": "Provedor da conciliação",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "maxLength": 50
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "running",
+                                "completed",
+                                "failed"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Deve ser igual ou posterior a date_from",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 15,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lista paginada de execuções de conciliação",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "allOf": [
+                                        {
+                                            "$ref": "#/components/schemas/PaginationMeta"
+                                        },
+                                        {
+                                            "properties": {
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação dos filtros",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationError"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/reconciliation/runs/{reconciliationRun}": {
+            "get": {
+                "tags": [
+                    "Conciliação"
+                ],
+                "summary": "Detalhar execução de conciliação",
+                "description": "Retorna os dados completos de uma execução de conciliação pelo seu identificador.",
+                "operationId": "getReconciliationRun",
+                "parameters": [
+                    {
+                        "name": "reconciliationRun",
+                        "in": "path",
+                        "description": "Identificador da execução de conciliação",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dados da execução de conciliação",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Execução de conciliação não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/reconciliation/runs/{reconciliationRun}/items": {
+            "get": {
+                "tags": [
+                    "Conciliação"
+                ],
+                "summary": "Listar itens da execução de conciliação",
+                "description": "Lista de forma paginada os itens (registros conciliados) de uma execução de conciliação específica.",
+                "operationId": "listReconciliationRunItems",
+                "parameters": [
+                    {
+                        "name": "reconciliationRun",
+                        "in": "path",
+                        "description": "Identificador da execução de conciliação",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 15,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lista paginada de itens da execução de conciliação",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "allOf": [
+                                        {
+                                            "$ref": "#/components/schemas/PaginationMeta"
+                                        },
+                                        {
+                                            "properties": {
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Execução de conciliação não encontrada"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/webhooks/transfeera": {
+            "post": {
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Receber webhook da Transfeera",
+                "description": "Endpoint de recebimento de eventos da Transfeera. **Destinado ao provedor Transfeera, não a integradores** - não exige X-API-Key.\n\nA requisição é autenticada por assinatura HMAC validada pelo gateway; chamadas sem assinatura válida são rejeitadas. O evento recebido é registrado e processado de forma assíncrona, atualizando o status das cobranças correspondentes.",
+                "operationId": "receiveTransfeeraWebhook",
+                "requestBody": {
+                    "description": "Payload do evento enviado pela Transfeera. A estrutura varia conforme o tipo do evento.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "event": {
+                                        "description": "Tipo do evento (também aceito como \"type\")",
+                                        "type": "string",
+                                        "example": "charge.paid",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Evento recebido e enfileirado para processamento",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "received": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "request_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Assinatura HMAC ausente ou inválida"
+                    },
+                    "429": {
+                        "description": "Limite de requisições de webhook excedido"
+                    }
+                }
+            }
+        },
+        "/webhooks/celcoin": {
+            "post": {
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Receber webhook da Celcoin",
+                "description": "Endpoint de recebimento de eventos da Celcoin. **Destinado ao provedor Celcoin, não a integradores** - não exige X-API-Key.\n\nA requisição é autenticada por assinatura HMAC validada pelo gateway; chamadas sem assinatura válida são rejeitadas. O evento recebido é registrado e processado de forma assíncrona, atualizando o status das cobranças correspondentes.",
+                "operationId": "receiveCelcoinWebhook",
+                "requestBody": {
+                    "description": "Payload do evento enviado pela Celcoin. A estrutura varia conforme o tipo do evento.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "event": {
+                                        "description": "Tipo do evento (também aceito como \"type\")",
+                                        "type": "string",
+                                        "example": "charge.paid",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Evento recebido e enfileirado para processamento",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "received": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "request_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Assinatura HMAC ausente ou inválida"
+                    },
+                    "429": {
+                        "description": "Limite de requisições de webhook excedido"
+                    }
+                }
+            }
+        },
+        "/webhook-deliveries": {
+            "get": {
+                "tags": [
+                    "Webhook Deliveries"
+                ],
+                "summary": "Listar entregas de webhook",
+                "description": "Lista o histórico de entregas de webhook da loja, com paginação e filtros opcionais. Os resultados são automaticamente restritos ao merchant da X-API-Key.",
+                "operationId": "listWebhookDeliveries",
+                "parameters": [
+                    {
+                        "name": "store_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "maxLength": 255
+                        }
+                    },
+                    {
+                        "name": "event_type",
+                        "in": "query",
+                        "description": "Tipo do evento (ex: charge.paid, charge.failed)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "maxLength": 80
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "pending",
+                                "delivered",
+                                "failed"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 25,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lista paginada de entregas de webhook",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        },
+                                        "meta": {
+                                            "properties": {
+                                                "current_page": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "last_page": {
+                                                    "type": "integer",
+                                                    "example": 4
+                                                },
+                                                "per_page": {
+                                                    "type": "integer",
+                                                    "example": 25
+                                                },
+                                                "total": {
+                                                    "type": "integer",
+                                                    "example": 87
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Falha de validação dos filtros",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationError"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/webhook-deliveries/{delivery}": {
+            "get": {
+                "tags": [
+                    "Webhook Deliveries"
+                ],
+                "summary": "Detalhar entrega de webhook",
+                "description": "Retorna os dados completos de uma entrega de webhook pelo seu identificador. A entrega precisa pertencer ao merchant da X-API-Key.",
+                "operationId": "getWebhookDelivery",
+                "parameters": [
+                    {
+                        "name": "delivery",
+                        "in": "path",
+                        "description": "Identificador da entrega de webhook",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dados da entrega de webhook",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Entrega não encontrada para este merchant"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/webhook-deliveries/{delivery}/retry": {
+            "post": {
+                "tags": [
+                    "Webhook Deliveries"
+                ],
+                "summary": "Reenviar entrega de webhook",
+                "description": "Agenda um novo envio de uma entrega de webhook que ainda não foi entregue com sucesso. Entregas já concluídas não podem ser reenviadas. A entrega precisa pertencer ao merchant da X-API-Key.",
+                "operationId": "retryWebhookDelivery",
+                "parameters": [
+                    {
+                        "name": "delivery",
+                        "in": "path",
+                        "description": "Identificador da entrega de webhook",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Reenvio agendado",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Retry agendado."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Entrega já foi entregue com sucesso e não pode ser reenviada",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Delivery ja foi entregue com sucesso."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Entrega não encontrada para este merchant"
+                    },
+                    "401": {
+                        "description": "X-API-Key ausente ou inválida"
+                    }
+                },
+                "security": [
+                    {
+                        "apiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/up": {
+            "get": {
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Verificar saúde da API",
+                "description": "Endpoint público de health check. Verifica a conectividade com o banco de dados e o Redis. Retorna 200 quando tudo está ok e 503 quando algum componente está degradado.",
+                "operationId": "healthCheck",
+                "responses": {
+                    "200": {
+                        "description": "API saudável - todos os componentes ok",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "ok",
+                                                "degraded"
+                                            ],
+                                            "example": "ok"
+                                        },
+                                        "timestamp": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                        },
+                                        "checks": {
+                                            "properties": {
+                                                "database": {
+                                                    "type": "string",
+                                                    "example": "ok"
+                                                },
+                                                "redis": {
+                                                    "type": "string",
+                                                    "example": "ok"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "API degradada - banco de dados ou Redis indisponível",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "degraded"
+                                        },
+                                        "timestamp": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                        },
+                                        "checks": {
+                                            "properties": {
+                                                "database": {
+                                                    "type": "string",
+                                                    "example": "error: connection refused"
+                                                },
+                                                "redis": {
+                                                    "type": "string",
+                                                    "example": "ok"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Charge": {
+                "description": "Uma cobrança no gateway.",
+                "properties": {
+                    "charge_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "example": "019e1f6e-3a7f-70b9-bc21-646dc1c965d1"
+                    },
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "example": "019e1f6e-3a7f-70b9-bc21-646dc1c965d1"
+                    },
+                    "reference": {
+                        "description": "Referência livre do merchant",
+                        "type": "string",
+                        "example": "inv-12345",
+                        "nullable": true
+                    },
+                    "amount": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 99.5
+                    },
+                    "currency": {
+                        "type": "string",
+                        "example": "BRL"
+                    },
+                    "payment_method": {
+                        "type": "string",
+                        "enum": [
+                            "pix",
+                            "boleto",
+                            "credit_card"
+                        ],
+                        "example": "pix"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "pending",
+                            "paid",
+                            "failed",
+                            "refunded",
+                            "expired",
+                            "canceled"
+                        ],
+                        "example": "pending"
+                    },
+                    "provider": {
+                        "type": "string",
+                        "enum": [
+                            "transfeera",
+                            "celcoin"
+                        ],
+                        "example": "transfeera"
+                    },
+                    "external_id": {
+                        "description": "ID da cobrança no provedor",
+                        "type": "string",
+                        "example": "1f14e7dd-5036-60d3-8957-75bee05dd04b",
+                        "nullable": true
+                    },
+                    "store_id": {
+                        "type": "string",
+                        "example": "019d997b-73a4-714d-a39a-447cdccdc8ef",
+                        "nullable": true
+                    },
+                    "merchant_id": {
+                        "type": "string",
+                        "example": "merchant-001",
+                        "nullable": true
+                    },
+                    "parent_charge_id": {
+                        "description": "Preenchido quando a cobrança é um upsell de outra",
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "customer_email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "cliente@example.com",
+                        "nullable": true
+                    },
+                    "customer_document": {
+                        "type": "string",
+                        "example": "12345678900",
+                        "nullable": true
+                    },
+                    "pix_data": {
+                        "description": "Dados do PIX (presente quando payment_method=pix)",
+                        "properties": {
+                            "qr_code": {
+                                "description": "Payload EMV do QR code",
+                                "type": "string"
+                            },
+                            "qr_code_base64": {
+                                "description": "Imagem do QR code em base64",
+                                "type": "string"
+                            },
+                            "copy_paste": {
+                                "description": "Código copia-e-cola",
+                                "type": "string"
+                            }
+                        },
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "boleto_data": {
+                        "description": "Dados do boleto (presente quando payment_method=boleto)",
+                        "properties": {
+                            "linha_digitavel": {
+                                "type": "string"
+                            },
+                            "pdf_url": {
+                                "type": "string"
+                            },
+                            "receivable_id": {
+                                "type": "string"
+                            }
+                        },
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "metadata": {
+                        "description": "Metadados livres do merchant",
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "type": "object"
+            },
+            "Account": {
+                "description": "Uma sub-conta Transfeera vinculada a uma loja.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "customer_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "merchant_id": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "store_id": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "transfeera_account_id": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "pending",
+                            "active",
+                            "blocked",
+                            "closed",
+                            "rejected"
+                        ],
+                        "example": "active"
+                    },
+                    "branch_number": {
+                        "type": "string",
+                        "example": "0001",
+                        "nullable": true
+                    },
+                    "account_number": {
+                        "type": "string",
+                        "example": "123456789",
+                        "nullable": true
+                    },
+                    "pix_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "pix_key_type": {
+                        "type": "string",
+                        "enum": [
+                            "evp",
+                            "cpf",
+                            "cnpj",
+                            "email",
+                            "phone"
+                        ],
+                        "nullable": true
+                    },
+                    "pix_key_status": {
+                        "type": "string",
+                        "enum": [
+                            "created",
+                            "pending",
+                            "active",
+                            "inactive",
+                            "error"
+                        ],
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "type": "object"
+            },
+            "PaginationMeta": {
+                "description": "Campos de paginação retornados nas listagens.",
+                "properties": {
+                    "current_page": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "last_page": {
+                        "type": "integer",
+                        "example": 5
+                    },
+                    "per_page": {
+                        "type": "integer",
+                        "example": 15
+                    },
+                    "total": {
+                        "type": "integer",
+                        "example": 73
+                    },
+                    "from": {
+                        "type": "integer",
+                        "example": 1,
+                        "nullable": true
+                    },
+                    "to": {
+                        "type": "integer",
+                        "example": 15,
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "ErrorResponse": {
+                "description": "Formato padrão de erro de negócio.",
+                "properties": {
+                    "error": {
+                        "type": "string",
+                        "example": "Only paid charges can be refunded. Current status: pending"
+                    },
+                    "code": {
+                        "type": "string",
+                        "example": "charge_failed",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "ValidationError": {
+                "description": "Erro de validação de payload (HTTP 422).",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "example": "The amount field is required."
+                    },
+                    "errors": {
+                        "type": "object",
+                        "example": {
+                            "amount": [
+                                "The amount field is required."
+                            ]
+                        }
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "securitySchemes": {
+            "apiKeyAuth": {
+                "type": "apiKey",
+                "description": "Chave de API do merchant, provisionada no painel ExPay.",
+                "name": "X-API-Key",
+                "in": "header"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Cobranças",
+            "description": "Criar, listar, detalhar, estornar e cancelar cobranças PIX, boleto e cartão"
+        },
+        {
+            "name": "Sub-contas",
+            "description": "Sub-contas Transfeera por loja (multicontas) e chaves PIX"
+        },
+        {
+            "name": "PIX Automático",
+            "description": "Mandatos de autorização e cobranças recorrentes via PIX Automático"
+        },
+        {
+            "name": "Conciliação",
+            "description": "Consulta de execuções de conciliação e seus itens"
+        },
+        {
+            "name": "Webhook Deliveries",
+            "description": "Histórico de entregas de webhook para a loja, com retry manual"
+        },
+        {
+            "name": "Webhooks",
+            "description": "Recebimento de eventos dos provedores (Transfeera, Celcoin)"
+        },
+        {
+            "name": "Health",
+            "description": "Verificação de saúde da API"
+        }
+    ]
+}

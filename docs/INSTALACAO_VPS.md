@@ -19,8 +19,10 @@ O assistente pedirá:
 2. E-mail para emissão do certificado HTTPS.
 3. E-mail de login do administrador.
 4. Senha inicial com pelo menos 14 caracteres e confirmação, ambas sem exibição.
+5. Chaves de API Partner e Expay, sem exibição. Enter permite configurar depois no painel.
+6. ID da loja Expay, opcional conforme sua conta.
 
-Senhas de PostgreSQL/Redis e chaves de criptografia/webhooks são geradas automaticamente. As chaves Partner/Mercado Pago, a cotação e a conexão WhatsApp serão configuradas no painel após a instalação. Não é necessário expor a Evolution em outro domínio.
+Senhas de PostgreSQL/Redis e chaves de criptografia/webhooks são geradas automaticamente. As chaves informadas são provisionadas no banco com criptografia; a chave Expay seleciona esse gateway no primeiro provisionamento. Campos deixados vazios podem ser preenchidos no painel. Confira cotação/preços, produtos e conecte seu WhatsApp após instalar. Não é necessário expor a Evolution em outro domínio.
 
 ## Apontamentos DNS
 
@@ -52,7 +54,7 @@ sudo bash /opt/revenda-whatsapp/scripts/install.sh
 
 Para atualizar, execute `sudo bash /opt/revenda-whatsapp/scripts/update.sh vX.Y.Z` com uma tag realmente publicada. Não é preciso autenticar no GitHub. Confira backup e compatibilidade em [operação](OPERACAO.md).
 
-As portas SSH são detectadas da sessão e de `sshd -T`. Se usar um encaminhamento incomum, informe explicitamente `SSH_PORT` ao executar o instalador; regras existentes do UFW são preservadas. Nenhuma porta de PostgreSQL, Redis ou Evolution é exposta publicamente.
+O comando preserva `SSH_CONNECTION` ao usar sudo para detectar a porta da sessão atual. As portas também são lidas de `sshd -T`. Se usar um encaminhamento incomum, informe explicitamente `SSH_PORT` ao executar o instalador; regras existentes do UFW são preservadas. Nenhuma porta de PostgreSQL, Redis ou Evolution é exposta publicamente.
 
 Comandos úteis:
 

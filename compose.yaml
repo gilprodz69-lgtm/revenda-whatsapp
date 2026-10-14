@@ -19,6 +19,8 @@ x-app: &app
     PARTNER_REQUESTS_PER_MINUTE: ${PARTNER_REQUESTS_PER_MINUTE:-60}
     PARTNER_ORDERS_PER_MINUTE: ${PARTNER_ORDERS_PER_MINUTE:-10}
     PIX_GATEWAY: ${PIX_GATEWAY:-disabled}
+    EXPAY_API_KEY: ${EXPAY_API_KEY:-}
+    EXPAY_STORE_ID: ${EXPAY_STORE_ID:-}
     MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
     MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
   restart: unless-stopped
@@ -88,7 +90,9 @@ services:
       <<: *app-env
       ADMIN_EMAIL: ${ADMIN_EMAIL:?Configure ADMIN_EMAIL}
       ADMIN_PASSWORD_FILE: /run/secrets/admin_password
-    secrets: [admin_password]
+      PARTNER_API_KEY_FILE: /run/secrets/partner_api_key
+      EXPAY_API_KEY_FILE: /run/secrets/expay_api_key
+    secrets: [admin_password, partner_api_key, expay_api_key]
     restart: 'no'
     depends_on:
       postgres: { condition: service_healthy }
@@ -231,3 +235,5 @@ volumes:
   caddy_config: {}
 secrets:
   admin_password: { file: ./secrets/admin-password }
+  partner_api_key: { file: ./secrets/partner-api-key }
+  expay_api_key: { file: ./secrets/expay-api-key }

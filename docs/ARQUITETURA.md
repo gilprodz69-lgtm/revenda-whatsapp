@@ -11,7 +11,7 @@ flowchart LR
   Cliente[Cliente WhatsApp] <--> Evolution[Evolution 2.3.7]
   Evolution -->|Webhook privado autenticado| API[Fastify]
   Painel[React] -->|Cookie + CSRF + RBAC| API
-  Gateway[Gateway Pix] -->|HMAC + consulta autenticada| API
+  Gateway[Gateway Pix] -->|Notifica??o + consulta autenticada| API
   API --> DB[(PostgreSQL)]
   Worker[Worker BullMQ] <--> DB
   Worker <--> Redis[(Redis)]

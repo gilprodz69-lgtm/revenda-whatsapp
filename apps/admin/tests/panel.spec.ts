@@ -64,6 +64,7 @@ async function mockApi(page: Page, loggedIn = true) {
   });
 }
 async function navigate(page: Page, label: string) {
+  await expect(page.getByRole('button', { name: 'Alternar tema' })).toBeVisible();
   const menu = page.getByRole('button', { name: 'Abrir menu' });
   if (await menu.isVisible()) await menu.click();
   await page.getByRole('button', { name: label, exact: true }).click();
@@ -115,6 +116,24 @@ test('não mostra segredos persistidos e permite editar template', async ({ page
   expect((await mutation).postDataJSON()).toEqual({
     'messages.summary': 'Compra: {produto} por {valor}',
   });
+});
+test('configura Expay e mantém a chave fora dos valores retornados', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Configurações');
+  await page.getByLabel('Gateway Pix').selectOption('expay');
+  await page.getByLabel(/Chave de API Expay/).fill('TEST-EXPAY-KEY-NEVER-REAL');
+  await page.getByLabel('ID da loja Expay (opcional)').fill('loja-teste');
+  const mutation = page.waitForRequest(
+    (req) => req.method() === 'PUT' && req.url().endsWith('/settings'),
+  );
+  await page.getByRole('button', { name: 'Salvar integrações' }).click();
+  expect((await mutation).postDataJSON()).toEqual({
+    'pix.gateway': 'expay',
+    'pix.expayStoreId': 'loja-teste',
+    'secret.expayApiKey': 'TEST-EXPAY-KEY-NEVER-REAL',
+  });
+  await expect(page.getByLabel(/Chave de API Expay/)).toHaveValue('');
 });
 test('conecta WhatsApp com uma mutação protegida e mostra o pareamento retornado', async ({
   page,

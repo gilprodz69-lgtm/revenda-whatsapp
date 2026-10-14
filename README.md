@@ -9,14 +9,14 @@ O contrato do fornecedor está em [docs/references/partner-api-docs.html](docs/r
 Ubuntu Server **24.04 LTS x86_64**, 2 vCPUs, 4 GB de RAM e 15 GB livres. O repositório é **público**, e a instalação não pede login ou token GitHub. Na sessão SSH da VPS, copie e execute **um único comando**:
 
 ```bash
-bash -o pipefail -c 'curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | sudo --preserve-env=SSH_CONNECTION bash'
 ```
 
 O comando requer `curl` e `sudo`, normalmente disponíveis na imagem Ubuntu do provedor. A versão inicial é fixada na tag `v1.0.0`, e os arquivos ficam em `/opt/revenda-whatsapp`.
 
-O instalador solicita domínio, e-mail para HTTPS, e-mail do administrador e senha inicial com confirmação. Mostra o IPv4 público e o registro DNS **A** a criar; você pode fazer o apontamento enquanto a instalação continua. Instala Docker pelo repositório oficial, constrói os serviços, aplica migrations, preserva a porta SSH no UFW e configura backup criptografado diário. HTTPS é emitido automaticamente quando o DNS e as portas 80/443 estiverem acessíveis. Execuções repetidas preservam `.env`, bancos, volumes e contas existentes.
+O instalador solicita domínio, e-mail para HTTPS, e-mail do administrador e senha inicial com confirmação. Também pede as chaves Partner/Expay sem exibi-las; Enter permite configurar depois. A chave Expay ativa o Pix no primeiro provisionamento. Mostra o IPv4 público e o registro DNS **A** a criar; você pode fazer o apontamento enquanto a instalação continua. Instala Docker pelo repositório oficial, constrói os serviços, aplica migrations, preserva a porta SSH no UFW e configura backup criptografado diário. HTTPS é emitido automaticamente quando o DNS e as portas 80/443 estiverem acessíveis. Execuções repetidas preservam `.env`, bancos, volumes e contas existentes.
 
-O mesmo comando está em [INSTALL_VPS.txt](INSTALL_VPS.txt). Consulte o [guia de instalação](docs/INSTALACAO_VPS.md) para token, apontamentos e verificação após o DNS.
+O mesmo comando está em [INSTALL_VPS.txt](INSTALL_VPS.txt). Consulte o [guia de instalação](docs/INSTALACAO_VPS.md) para apontamentos e verificação após o DNS.
 
 No painel:
 
@@ -24,7 +24,7 @@ No painel:
 2. Escolha cotação manual real ou BCB/PTAX; sem cotação válida, vendas ficam bloqueadas.
 3. Sincronize o catálogo, defina preços e confirme a autorização de revenda dos produtos.
 4. Crie uma instância WhatsApp e conecte pelo QR Code ou pareamento suportado pela Evolution.
-5. Para depósitos, configure Mercado Pago e o segredo de webhook. Cadastre `https://SEU_DOMINIO/webhooks/pix` nas notificações de **Payments**, evento `payment`. Pix permanece desativado até sua configuração.
+5. Para depósitos, confira **Expay Brasil** e a chave da API atual em Configurações. Se sua operação exigir, informe o ID da loja. Configure na loja Expay o webhook `https://SEU_DOMINIO/webhooks/pix/expay`. O sistema também consulta as cobranças automaticamente e só credita saldo após confirmação autenticada de valor, referência, moeda e método.
 6. Execute os critérios de [homologação](docs/HOMOLOGACAO.md) antes de abrir vendas.
 
 O cliente adiciona saldo por Pix, recebe crédito confirmado pelo gateway e então confirma a compra com a carteira. Compra direta por Pix atrelado a um pedido não é oferecida nesta versão: o depósito e o pedido possuem identidades separadas e auditáveis.

@@ -22,7 +22,13 @@ export async function createDeposit(
   const id = randomUUID(),
     expires = new Date(Date.now() + 3600000);
   // Monetary JSON token is serialized from Decimal, without a floating point calculation.
-  const request = `{"transaction_amount":${value.toFixed(2)},"payment_method_id":"pix","external_reference":${JSON.stringify(id)},"description":"Depósito na carteira","notification_url":${JSON.stringify(`${env.PUBLIC_API_URL}/webhooks/pix` + '?source_news=webhooks')},"date_of_expiration":${JSON.stringify(expires.toISOString())},"payer":${JSON.stringify({ email: payer.email, identification: { type: 'CPF', number: payer.cpf } })}}`;
+  const customer = await db.customer.findUniqueOrThrow({ where: { id: customerId } });
+  const request = await gateway.buildRequest({
+    reference: id,
+    amount: value.toFixed(2),
+    payer: { ...payer, name: customer.name.slice(0, 255) },
+    expiresAt: expires,
+  });
   const payment = await db.payment.upsert({
     where: { idempotencyKey: key },
     create: {
@@ -60,7 +66,7 @@ export async function recoverPaymentCreation(id: string) {
       status: 'PENDING',
       encryptedPixCode: charge.pixCode ? encrypt(charge.pixCode) : null,
       encryptedQrImage: charge.qrBase64 ? encrypt(charge.qrBase64) : null,
-      expiresAt: charge.expiresAt ?? payment.expiresAt,
+      expiresAt: charge.expiresAt ?? (gateway.name === 'expay' ? null : payment.expiresAt),
     },
   });
   await reconcilePayment(charge.id);
@@ -77,7 +83,7 @@ function validateCharge(
     (payment.gatewayId && payment.gatewayId !== charge.id)
   )
     throw new AppError('PAYMENT_MISMATCH', 'Cobrança divergente. Revisão necessária.', 409);
-  if (env.NODE_ENV === 'production' && !charge.liveMode)
+  if (env.NODE_ENV === 'production' && charge.liveMode === false)
     throw new AppError(
       'TEST_PAYMENT_REJECTED',
       'Pagamento de teste não pode creditar produção.',
@@ -130,9 +136,12 @@ export async function reconcilePayment(gatewayId: string) {
     ) {
       await tx.payment.update({ where: { id: current.id }, data: { status: 'REVIEW' } });
       await tx.customer.update({ where: { id: current.customerId }, data: { blocked: true } });
-    } else if (!current.creditedAt && ['cancelled', 'rejected'].includes(charge.status))
+    } else if (!current.creditedAt && ['cancelled', 'rejected', 'refunded'].includes(charge.status))
       await tx.payment.update({ where: { id: current.id }, data: { status: 'CANCELLED' } });
-    else if (!current.creditedAt && current.expiresAt && current.expiresAt < new Date()) {
+    else if (
+      !current.creditedAt &&
+      (charge.status === 'expired' || (current.expiresAt && current.expiresAt < new Date()))
+    ) {
       await tx.payment.update({ where: { id: current.id }, data: { status: 'EXPIRED' } });
       await tx.message.upsert({
         where: { key: `payment-expired-${current.id}` },

@@ -10,7 +10,7 @@
   Referrer-Policy strict-origin-when-cross-origin
   -Server
  }
- @backend path /api/* /webhooks/pix /health/*
+ @backend path /api/* /webhooks/pix /webhooks/pix/expay /health/*
  handle @backend {
   reverse_proxy api:3000
  }

@@ -1,1 +1,1 @@
-bash -o pipefail -c 'curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | sudo --preserve-env=SSH_CONNECTION bash'

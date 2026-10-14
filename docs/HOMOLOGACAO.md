@@ -11,7 +11,7 @@ Esta versão não apresenta integrações reais sem credenciais como concluídas
 - Integração: PostgreSQL/Redis isolados, migrations completas, transações reais com externos mockados.
 - UI: Playwright, respostas de API explicitamente mockadas; sem transações externas.
 
-O relatório final da execução local é registrado em [VALIDACAO.md](VALIDACAO.md). A CI inclui os checks automatizáveis, mas seu resultado somente existe depois de publicar/executar o workflow no GitHub. Não confundir definição de CI com execução aprovada.
+O relatório da execução local é registrado em [VALIDACAO.md](VALIDACAO.md). Os resultados no Ubuntu estão nas [execuções do workflow GitHub](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/workflows/ci.yaml). A CI também constrói as imagens e inicia PostgreSQL, Redis, migrations, administrador, API, worker, painel e Evolution em ambiente descartável. A validação da configuração Caddy não substitui emissão de certificado com domínio real.
 
 ## Critérios antes de abrir vendas
 
@@ -26,7 +26,7 @@ O relatório final da execução local é registrado em [VALIDACAO.md](VALIDACAO
 
 ## Recursos com escopo explícito
 
-- Gateway: interface intercambiável + Mercado Pago real configurável. EfíBank não está implementado.
+- Gateway: Expay Brasil conforme a API atual `/api/v1/charges`; Mercado Pago mantido como adaptador de compatibilidade. EfíBank não está implementado.
 - Pagamento: depósito Pix na carteira e compra com saldo. Não há cobrança Pix direta vinculada a um pedido.
 - Atendimento: takeover por cliente, mensagens humanas pelo painel e retomada; horários são texto configurável. Não há escalonamento automático por calendário de plantão.
 - Templates: mensagens de cada etapa editáveis pelo painel, com placeholders validados. Dados financeiros/entrega e opções de navegação são acrescentados pelo sistema.

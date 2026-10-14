@@ -31,7 +31,7 @@ Estorno local cancela envios ainda pendentes; quando um envio está SENDING/UNKN
 
 ### Pix não creditado
 
-Confira configuração Payments v1, Access Token, secret e URL HTTPS. Webhook HMAC é obrigatório; notificações antigas podem ser recuperadas pelo polling. Confira valor, referência e moeda no provedor. Nunca use ajuste de carteira para simular aprovação de Pix. Ajuste administrativo é uma operação financeira separada com justificativa/auditoria.
+Confira seleção Expay, chave `X-API-Key` da API atual, ID da loja se aplicável e URL HTTPS `/webhooks/pix/expay`. A chave antiga `merchant_key` pertence a outro contrato. A confirmação depende da consulta autenticada da cobrança; o corpo do webhook nunca credita saldo. Consulte UUID, referência, valor, BRL, método Pix e status na Expay. O polling também recupera notificações perdidas durante sete dias. Nunca use ajuste de carteira para simular aprovação de Pix. Ajuste administrativo é uma operação financeira separada com justificativa/auditoria.
 
 ### Cotação vencida / estoque
 

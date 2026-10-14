@@ -24,7 +24,7 @@ import {
   incomingSchema,
   normalizePhone,
 } from './integrations/evolution.js';
-import { pixGateway } from './integrations/pix.js';
+import { pixGateway, expayNotificationChargeId } from './integrations/pix.js';
 import { partner } from './integrations/partner.js';
 import { orderQueue } from './core/queues.js';
 import { templates, messageTemplate } from './modules/templates.js';
@@ -208,6 +208,30 @@ export async function buildApp() {
     });
     return reply.code(202).send({ accepted: true });
   });
+  app.post(
+    '/webhooks/pix/expay',
+    { config: { rateLimit: { max: 30, timeWindow: 60000 } } },
+    async (request, reply) => {
+      const gatewayId = expayNotificationChargeId(request.body);
+      if (gatewayId && (await pixGateway()).name === 'expay') {
+        const payment = await db.payment.findUnique({ where: { gatewayId } });
+        if (payment?.gateway === 'expay') {
+          // Callbacks only trigger an authenticated API lookup; their status and amount are never trusted.
+          const key = `expay-${gatewayId}-${Math.floor(Date.now() / 15000)}`;
+          await db.webhookEvent.upsert({
+            where: { key },
+            create: {
+              key,
+              source: 'pix',
+              encryptedPayload: encrypt(JSON.stringify({ paymentId: gatewayId })),
+            },
+            update: {},
+          });
+        }
+      }
+      return reply.code(202).send({ accepted: true });
+    },
+  );
   await app.register(
     async (admin) => {
       admin.addHook('preHandler', authenticate);
@@ -696,18 +720,33 @@ export async function buildApp() {
         'messages.welcome',
         'bot.greetings',
         'pix.gateway',
+        'pix.expayStoreId',
       ];
       admin.get('/settings', async (request) => {
         requirePermission(request, 'configure');
         const values = Object.fromEntries(
-          await Promise.all(publicKeys.map(async (key) => [key, await setting(key, null)])),
+          await Promise.all(
+            publicKeys.map(async (key) => [
+              key,
+              await setting(
+                key,
+                key === 'pix.gateway'
+                  ? env.PIX_GATEWAY
+                  : key === 'pix.expayStoreId'
+                    ? env.EXPAY_STORE_ID
+                    : null,
+              ),
+            ]),
+          ),
         );
         const secrets = Object.fromEntries(
           await Promise.all(
-            ['secret.partnerKey', 'secret.mpToken', 'secret.mpWebhookSecret'].map(async (key) => [
-              key,
-              !!(await setting(key, '')),
-            ]),
+            [
+              'secret.partnerKey',
+              'secret.expayApiKey',
+              'secret.mpToken',
+              'secret.mpWebhookSecret',
+            ].map(async (key) => [key, !!(await setting(key, ''))]),
           ),
         );
         return {
@@ -715,6 +754,8 @@ export async function buildApp() {
           secrets,
           environment: {
             partnerKey: !!env.PARTNER_API_KEY,
+            expayApiKey: !!env.EXPAY_API_KEY,
+            expayStoreId: env.EXPAY_STORE_ID,
             mpToken: !!env.MP_ACCESS_TOKEN,
             mpWebhookSecret: !!env.MP_WEBHOOK_SECRET,
           },
@@ -736,7 +777,9 @@ export async function buildApp() {
           'human.hours': z.string().max(300),
           'messages.welcome': z.string().min(1).max(3000).transform(validateTemplate),
           'bot.greetings': z.array(z.string().min(1).max(30)).max(20),
-          'pix.gateway': z.enum(['disabled', 'mercadopago']),
+          'pix.gateway': z.enum(['disabled', 'expay', 'mercadopago']),
+          'pix.expayStoreId': z.string().max(255),
+          'secret.expayApiKey': z.string().min(16).max(500),
           'secret.partnerKey': z.string().min(20).max(300),
           'secret.mpToken': z.string().min(20).max(500),
           'secret.mpWebhookSecret': z.string().min(16).max(300),

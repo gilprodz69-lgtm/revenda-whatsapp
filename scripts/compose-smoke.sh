@@ -21,7 +21,7 @@ cleanup() {
 		dc logs --tail=70 api worker admin migrate || true
 	fi
 	dc down --volumes --remove-orphans >/dev/null 2>&1 || true
-	rm -f secrets/admin-password
+	rm -f secrets/admin-password secrets/partner-api-key secrets/expay-api-key
 	rmdir secrets || true
 	rm -rf -- "$temp_dir"
 	exit "$result"
@@ -29,8 +29,9 @@ cleanup() {
 trap cleanup EXIT
 mkdir -m 0700 secrets
 openssl rand -hex 24 >secrets/admin-password
-chmod 0640 secrets/admin-password
-sudo chown "$(id -u):1000" secrets/admin-password
+touch secrets/partner-api-key secrets/expay-api-key
+chmod 0640 secrets/admin-password secrets/partner-api-key secrets/expay-api-key
+sudo chown "$(id -u):1000" secrets/admin-password secrets/partner-api-key secrets/expay-api-key
 db_password=$(openssl rand -hex 32)
 redis_password=$(openssl rand -hex 32)
 cat >"$temp_dir/env" <<EOF
@@ -63,5 +64,5 @@ dc exec -T api node -e 'const r=await fetch("http://127.0.0.1:3000/health/ready"
 dc exec -T worker node -e 'import("./dist/core/db.js").then(async({redis})=>{const v=await redis.get("worker:heartbeat");await redis.quit();process.exit(v?0:1)})'
 dc exec -T admin wget -q -O /dev/null http://127.0.0.1:8080/health
 dc exec -T evolution node -e 'const r=await fetch("http://127.0.0.1:8080");if(!r.ok)process.exit(1)' --input-type=module
-dc run --rm --no-deps proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+dc run --rm --no-deps --entrypoint caddy proxy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 echo 'Compose: PostgreSQL, Redis, migrations, administrador, API, worker, painel e Evolution iniciados com saúde.'

@@ -292,7 +292,7 @@ export async function processIncoming(eventId: string) {
             { email: state.email, cpf },
             state.depositKey ?? `deposit-${event.key}`,
           );
-          response = `${await messageTemplate('awaitingPayment', { valor: payment.amountBrl.toFixed(2) })}\nVencimento: ${payment.expiresAt?.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\n\n${payment.encryptedPixCode ? decrypt(payment.encryptedPixCode) : 'Cobrança em processamento. Aguarde ou solicite suporte.'}`;
+          response = `${await messageTemplate('awaitingPayment', { valor: payment.amountBrl.toFixed(2) })}\nVencimento: ${payment.expiresAt?.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) ?? 'consulte o prazo no aplicativo do banco'}\n\n${payment.encryptedPixCode ? decrypt(payment.encryptedPixCode) : 'Cobrança em processamento. Aguarde ou solicite suporte.'}`;
           qr = payment.encryptedQrImage ? decrypt(payment.encryptedQrImage) : undefined;
           state = { step: 'MENU' };
         }

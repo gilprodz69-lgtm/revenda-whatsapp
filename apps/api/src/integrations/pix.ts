@@ -5,7 +5,8 @@ import { AppError } from '../core/errors.js';
 import { equalSecret } from '../core/crypto.js';
 import { credentials, setting } from '../core/settings.js';
 import { env } from '../config.js';
-export type PixPayer = { email: string; cpf: string };
+export type PixPayer = { email: string; cpf: string; name?: string };
+export type PixRequest = { reference: string; amount: string; payer: PixPayer; expiresAt: Date };
 export type PixCharge = {
   id: string;
   reference: string;
@@ -16,10 +17,11 @@ export type PixCharge = {
   qrBase64?: string;
   expiresAt?: Date;
   method: string;
-  liveMode: boolean;
+  liveMode: boolean | null;
 };
 export interface PixGateway {
   name: string;
+  buildRequest(input: PixRequest): Promise<string>;
   create(body: string, idempotencyKey: string): Promise<PixCharge>;
   get(id: string): Promise<PixCharge>;
   validateWebhook(signature: string, requestId: string, dataId: string): Promise<boolean>;
@@ -73,6 +75,9 @@ export function verifyMpSignature(
 }
 export class MercadoPagoGateway implements PixGateway {
   name = 'mercadopago';
+  async buildRequest(input: PixRequest) {
+    return `{"transaction_amount":${input.amount},"payment_method_id":"pix","external_reference":${JSON.stringify(input.reference)},"description":"Depósito na carteira","notification_url":${JSON.stringify(`${env.PUBLIC_API_URL}/webhooks/pix?source_news=webhooks`)},"date_of_expiration":${JSON.stringify(input.expiresAt.toISOString())},"payer":${JSON.stringify({ email: input.payer.email, identification: { type: 'CPF', number: input.payer.cpf } })}}`;
+  }
   async call(path: string, method = 'GET', body?: string, key?: string): Promise<PixCharge> {
     const { mpToken } = await credentials();
     if (!mpToken)
@@ -115,8 +120,139 @@ export class MercadoPagoGateway implements PixGateway {
     return verifyMpSignature(mpWebhookSecret, signature, requestId, dataId);
   }
 }
+const expayId = z.string().uuid();
+const expaySchema = z
+  .object({
+    id: expayId.optional(),
+    charge_id: expayId.optional(),
+    reference: z.string().min(1),
+    amount: z
+      .union([z.number().finite(), z.string().regex(/^\d+(\.\d{1,2})?$/)])
+      .refine((value) => {
+        const amount = new Decimal(value);
+        return amount.isPositive() && amount.decimalPlaces() <= 2;
+      }),
+    currency: z.string(),
+    payment_method: z.string(),
+    status: z.enum(['pending', 'paid', 'failed', 'refunded', 'expired', 'canceled']),
+    expires_at: z.string().datetime({ offset: true }).nullish(),
+    live_mode: z.boolean().optional(),
+    pix_data: z
+      .object({
+        qr_code: z.string().optional(),
+        copy_paste: z.string().optional(),
+        qr_code_base64: z.string().optional(),
+      })
+      .nullish(),
+  })
+  .refine(
+    (charge) =>
+      !!(charge.id || charge.charge_id) &&
+      (!charge.id || !charge.charge_id || charge.id === charge.charge_id),
+    'Identificação da cobrança divergente.',
+  );
+export function parseExpayCharge(payload: unknown): PixCharge {
+  const charge = expaySchema.parse(payload);
+  const statuses: Record<typeof charge.status, string> = {
+    pending: 'pending',
+    paid: 'approved',
+    failed: 'rejected',
+    refunded: 'refunded',
+    expired: 'expired',
+    canceled: 'cancelled',
+  };
+  return {
+    id: (charge.charge_id ?? charge.id)!,
+    reference: charge.reference,
+    amount: new Decimal(charge.amount).toFixed(2),
+    currency: charge.currency,
+    method: charge.payment_method,
+    status: statuses[charge.status],
+    pixCode: charge.pix_data?.copy_paste || charge.pix_data?.qr_code,
+    qrBase64: charge.pix_data?.qr_code_base64?.replace(/^data:image\/png;base64,/, ''),
+    expiresAt: charge.expires_at ? new Date(charge.expires_at) : undefined,
+    // ExPay's current contract does not expose a sandbox/live flag. Do not invent one.
+    liveMode: charge.live_mode ?? null,
+  };
+}
+export class ExpayGateway implements PixGateway {
+  name = 'expay';
+  async buildRequest(input: PixRequest) {
+    const storeId = await setting('pix.expayStoreId', env.EXPAY_STORE_ID);
+    const fields = JSON.stringify({
+      currency: 'BRL',
+      payment_method: 'pix',
+      reference: input.reference,
+      customer: { name: input.payer.name, document: input.payer.cpf, email: input.payer.email },
+      ...(storeId ? { store_id: storeId } : {}),
+    });
+    // Serialize Decimal directly as a JSON number, without binary floating point arithmetic.
+    return `{"amount":${input.amount},${fields.slice(1)}`;
+  }
+  async call(path: string, method = 'GET', body?: string, key?: string) {
+    const { expayApiKey } = await credentials();
+    if (!expayApiKey)
+      throw new AppError('PIX_NOT_CONFIGURED', 'Configure a chave de API da Expay Brasil.', 503);
+    const response = await fetch(`https://expaybrasil.com/api/v1${path}`, {
+      method,
+      headers: {
+        'X-API-Key': expayApiKey,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(key ? { 'Idempotency-Key': key } : {}),
+      },
+      body,
+      signal: AbortSignal.timeout(15000),
+      redirect: 'error',
+    });
+    if (!response.ok)
+      throw new AppError(
+        'PIX_PROVIDER_ERROR',
+        'Não foi possível consultar a cobrança na Expay Brasil.',
+        503,
+      );
+    return parseExpayCharge(await response.json());
+  }
+  create(body: string, key: string) {
+    return this.call('/charges', 'POST', body, key);
+  }
+  async get(id: string) {
+    return this.call(`/charges/${encodeURIComponent(expayId.parse(id))}`);
+  }
+  async validateWebhook() {
+    return false;
+  }
+}
+// Notification shapes may vary by store configuration. Only recognized UUIDs trigger an API lookup;
+// unknown shapes are acknowledged and the independent polling keeps reconciliation working.
+export function expayNotificationChargeId(body: unknown): string | null {
+  const parsed = z
+    .object({
+      charge_id: z.unknown().optional(),
+      id: z.unknown().optional(),
+      data: z.unknown().optional(),
+    })
+    .passthrough()
+    .safeParse(body);
+  if (!parsed.success) return null;
+  const data = z
+    .object({ charge_id: z.unknown().optional(), id: z.unknown().optional() })
+    .passthrough()
+    .safeParse(parsed.data.data);
+  for (const candidate of [
+    parsed.data.charge_id,
+    data.success ? data.data.charge_id : null,
+    data.success ? data.data.id : null,
+    parsed.data.id,
+  ]) {
+    const result = expayId.safeParse(candidate);
+    if (result.success) return result.data;
+  }
+  return null;
+}
 export async function pixGateway(): Promise<PixGateway> {
   const name = await setting('pix.gateway', env.PIX_GATEWAY);
+  if (name === 'expay') return new ExpayGateway();
   if (name === 'mercadopago') return new MercadoPagoGateway();
   throw new AppError(
     'PIX_DISABLED',

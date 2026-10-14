@@ -1078,9 +1078,13 @@ function App() {
                             onSubmit={async (e) => {
                               e.preventDefault();
                               const f = new FormData(e.currentTarget);
-                              const payload: Row = { 'pix.gateway': f.get('gateway') };
+                              const payload: Row = {
+                                'pix.gateway': f.get('gateway'),
+                                'pix.expayStoreId': f.get('expayStore') || '',
+                              };
                               for (const [field, key] of [
                                 ['partner', 'secret.partnerKey'],
+                                ['expayKey', 'secret.expayApiKey'],
                                 ['token', 'secret.mpToken'],
                                 ['webhook', 'secret.mpWebhookSecret'],
                               ])
@@ -1102,9 +1106,29 @@ function App() {
                                 defaultValue={data.values['pix.gateway'] ?? 'disabled'}
                               >
                                 <option value="disabled">Desativado</option>
+                                <option value="expay">Expay Brasil</option>
                                 <option value="mercadopago">Mercado Pago</option>
                               </select>
                             </Field>
+                            <Field
+                              name="expayKey"
+                              type="password"
+                              label={`Chave de API Expay ${data.secrets['secret.expayApiKey'] || data.environment.expayApiKey ? '· Configurada' : '· Pendente'}`}
+                            />
+                            <Field
+                              name="expayStore"
+                              label="ID da loja Expay (opcional)"
+                              defaultValue={
+                                data.values['pix.expayStoreId'] ??
+                                data.environment.expayStoreId ??
+                                ''
+                              }
+                            />
+                            <p className="muted">
+                              Na Expay, configure o webhook da loja em /webhooks/pix/expay. O
+                              sistema também consulta os pagamentos automaticamente. Deixe chaves
+                              vazias para manter as credenciais.
+                            </p>
                             <Field
                               name="token"
                               type="password"

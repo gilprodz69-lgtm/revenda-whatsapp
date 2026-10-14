@@ -1,6 +1,6 @@
 # Registro de validação
 
-Ambiente de desenvolvimento: Windows, Node 22.22.0. Docker Engine/WSL não estão instalados no host; foi usado somente o CLI Compose para validar a configuração. Validação em Ubuntu/VPS e integrações reais ainda pendentes.
+Ambiente de desenvolvimento: Windows, Node 22.22.0. Docker Engine/WSL não estão instalados no host; localmente foi usado o CLI Compose para validar a configuração. Builds e inicialização de containers também são verificados pelo workflow no Ubuntu 24.04 do GitHub. Instalação numa VPS limpa e integrações com contas reais continuam pendentes.
 
 Verificações executadas em 14/10/2026:
 
@@ -24,4 +24,8 @@ Os testes verificaram concorrência/idempotência do ledger, saldo insuficiente,
 
 Total: 73 testes automatizados aprovados (42 unitários + 23 de integração + 8 de interface), além do smoke de processos separados. A solicitação de conexão/pareamento no painel também foi verificada como POST protegido por CSRF; a chamada interna segue o GET oficial da Evolution.
 
-Pendente: build/boot efetivo dos containers, instalação limpa Ubuntu 24.04, emissão de HTTPS, backup/restore em VPS, execução do workflow GitHub e testes com credenciais reais Partner/Mercado Pago/WhatsApp. O CLI de configuração não substitui esses testes. Esta entrega não foi publicada nem implantada em uma conta externa.
+O código foi publicado no repositório público [gilprodz69-lgtm/revenda-whatsapp](https://github.com/gilprodz69-lgtm/revenda-whatsapp). O [workflow](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/workflows/ci.yaml) executa os testes no Ubuntu, builds Docker, inicialização dos serviços e validação da configuração Caddy. Consulte a execução correspondente ao commit/release para seu resultado.
+
+O assistente de instalação também passou em testes isolados de validação de domínio, portas e preservação do SSH. O comando e a versão do bootstrap foram conferidos; entradas interativas são lidas de `/dev/tty` para funcionar com download por pipe.
+
+Pendente na VPS: instalação limpa Ubuntu 24.04, emissão de HTTPS com domínio real, backup/restore e testes com credenciais reais Partner/Mercado Pago/WhatsApp. Os testes de CI não substituem essas etapas. Nenhuma VPS do usuário foi acessada ou alterada nesta entrega.
