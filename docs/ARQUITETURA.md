@@ -11,7 +11,7 @@ flowchart LR
   Cliente[Cliente WhatsApp] <--> Evolution[Evolution 2.3.7]
   Evolution -->|Webhook privado autenticado| API[Fastify]
   Painel[React] -->|Cookie + CSRF + RBAC| API
-  Gateway[Gateway Pix] -->|Notifica??o + consulta autenticada| API
+  Gateway[Gateway Pix] -->|Notificação + consulta autenticada| API
   API --> DB[(PostgreSQL)]
   Worker[Worker BullMQ] <--> DB
   Worker <--> Redis[(Redis)]
@@ -47,7 +47,7 @@ Resultado desconhecido nunca libera ou captura a reserva por suposição. A reco
 
 ## Pagamento e entrega
 
-Pix usa a interface `PixGateway`; o adaptador real disponível é Mercado Pago Payments v1. `disabled` recusa cobranças. O ID local é a referência externa; o corpo e vencimento são persistidos antes de qualquer chamada. Timeout na criação permite recuperar com a mesma chave de idempotência. Webhooks HMAC autenticados são dicas de reconciliação: crédito exige GET autenticado ao gateway, referência/valor/moeda/meio corretos e `approved`. Pagamentos de teste são recusados em produção. Reversão de depósito já creditado bloqueia a conta e encaminha o caso à revisão; não gera saldo negativo automaticamente.
+Pix usa a interface `PixGateway`, com Expay Brasil pela API atual e Mercado Pago por compatibilidade. `disabled` recusa cobranças. O ID local é a referência externa, e o corpo é persistido antes da primeira chamada. Retentativas preservam a chave de idempotência. A Expay usa X-API-Key e Idempotency-Key; callbacks apenas acionam consulta autenticada. Crédito exige GET ao gateway, UUID/referência/valor/moeda/meio corretos e status confirmado. O vencimento vem do provedor. Indicador explícito de pagamento de teste é recusado em produção; a Expay não documenta esse indicador no contrato atual. Reversão de depósito já creditado bloqueia a conta e encaminha o caso à revisão; não gera saldo negativo automaticamente.
 
 Credenciais e textos ficam cifrados com AES-256-GCM; a chave mestra fica fora do banco. Cada linha gera uma entrega e uma mensagem de outbox. Após enviar, a resposta com ID técnico é registrada. **Evolution não documenta chave idempotente de envio**: timeout ou queda após enviar produz `UNKNOWN` e exige operador, sem retentativa automática. Não se promete entrega exatamente uma vez através da rede WhatsApp. Botão de reenvio não permite trocar destinatário e exige justificativa. Conteúdo protegido não é exibido no detalhe de pedidos.
 
