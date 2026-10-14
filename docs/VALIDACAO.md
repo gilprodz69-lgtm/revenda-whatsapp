@@ -1,5 +1,11 @@
 # Registro de validação
 
+## Versão 1.0.3
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38655654871), commit de código `b3660c2`, passou em 14/10/2026: 78 testes unitários, 36 de integração e 18 de interface (132 no total), TypeScript, build, smoke API/worker, auditoria npm, updater, imagens e inicialização Docker. O menu principal e a carteira usam listas nativas; o fluxo de compra recebeu seleções `listResponseMessage`, rejeitou menus antigos e confirmou um pedido uma única vez. O smoke verificou duas chamadas `sendList` sem depender da varredura periódica.
+
+A persistência das integrações foi verificada no PostgreSQL: chaves Partner/Expay cifradas, presença indicada no GET sem devolver os segredos, gateway/ID mantidos e credenciais preservadas ao salvar novamente sem enviar chaves. Os testes do painel confirmaram esses estados após salvar, recarregar e salvar novamente, em desktop e celular. A formatação passou no verificador local. Os serviços externos dos testes de envio e configuração foram simulados; nenhuma credencial real do operador foi utilizada.
+
 ## Versão 1.0.2
 
 A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38653318295), commit de código `fbb950e`, foi aprovada em 14/10/2026: 78 testes unitários, 36 de integração e 18 de interface desktop/celular (132 no total), TypeScript, build, auditoria npm, scripts, updater, imagens Docker e inicialização dos serviços. O teste de processos reais enviou duas respostas interativas em 80 ms e 67 ms, sem varredura periódica nem duplicação; a Evolution de envio foi um servidor HTTP simulado.

@@ -57,6 +57,8 @@ Estorno local cancela envios ainda pendentes; quando um envio está SENDING/UNKN
 
 ### Pix não creditado
 
+Na seção Integrações, **Configurada** e o placeholder **Chave salva — preencha apenas para substituir** indicam que a credencial está cadastrada. O campo secreto vazio não significa perda: as chaves não são devolvidas ao navegador. Digite somente para substituir; salvar em branco mantém a chave existente. Gateway e ID da loja permanecem visíveis depois de salvar/recarregar. Os campos específicos aparecem conforme o gateway selecionado; alternar entre gateways não remove as credenciais já salvas.
+
 Confira seleção Expay, chave `X-API-Key` da API atual, ID da loja se aplicável e URL HTTPS `/webhooks/pix/expay`. A chave antiga `merchant_key` pertence a outro contrato. A confirmação depende da consulta autenticada da cobrança; o corpo do webhook nunca credita saldo. Consulte UUID, referência, valor, BRL, método Pix e status na Expay. O polling também recupera notificações perdidas durante sete dias. Nunca use ajuste de carteira para simular aprovação de Pix. Ajuste administrativo é uma operação financeira separada com justificativa/auditoria.
 
 ### Cotação vencida / estoque
