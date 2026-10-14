@@ -663,6 +663,29 @@ tbody tr:last-child td {
   color: var(--danger);
   margin-top: 16px;
 }
+.integration-note {
+  display: flex;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-alt);
+}
+.integration-note > svg {
+  flex-shrink: 0;
+  color: var(--accent-text);
+  margin-top: 2px;
+}
+.integration-note p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.integration-note strong {
+  color: var(--text-secondary);
+}
+.gateway-fields[hidden] {
+  display: none;
+}
 .toast {
   border-radius: 14px;
   background: var(--surface-raised);

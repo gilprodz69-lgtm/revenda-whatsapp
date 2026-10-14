@@ -12,7 +12,7 @@ import { evolution, InteractiveRejected } from '../../src/integrations/evolution
 import { PartnerError, AppError } from '../../src/core/errors.js';
 import { encrypt, decrypt } from '../../src/core/crypto.js';
 import type { Interactive } from '../../src/modules/interactive.js';
-import { saveSetting } from '../../src/core/settings.js';
+import { saveSetting, credentials } from '../../src/core/settings.js';
 import { buildApp } from '../../src/app.js';
 import {
   incomingQueue,
@@ -996,6 +996,51 @@ describe('Autenticação, filas e proteção de webhooks financeiros', () => {
       ),
     ).not.toContain('TEST_ONLY_CODE');
     const initial = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    const partnerKey = 'TEST-PARTNER-KEY-PERSISTED-12345',
+      expayKey = 'TEST-EXPAY-KEY-PERSISTED-12345';
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          headers,
+          payload: {
+            'secret.partnerKey': partnerKey,
+            'secret.expayApiKey': expayKey,
+            'pix.gateway': 'expay',
+            'pix.expayStoreId': 'my-existing-store',
+          },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const saved = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(saved.json().secrets).toMatchObject({
+      'secret.partnerKey': true,
+      'secret.expayApiKey': true,
+    });
+    expect(saved.json().values).toMatchObject({
+      'pix.gateway': 'expay',
+      'pix.expayStoreId': 'my-existing-store',
+    });
+    expect(saved.body).not.toContain(partnerKey);
+    expect(saved.body).not.toContain(expayKey);
+    const encrypted = await db.setting.findUniqueOrThrow({ where: { key: 'secret.expayApiKey' } });
+    expect(encrypted.encrypted).toBe(true);
+    expect(String(encrypted.value)).not.toContain(expayKey);
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          headers,
+          payload: { 'pix.gateway': 'expay', 'pix.expayStoreId': 'my-existing-store' },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (await db.setting.findUniqueOrThrow({ where: { key: 'secret.expayApiKey' } })).value,
+    ).toEqual(encrypted.value);
+    expect(await credentials()).toMatchObject({ partnerKey, expayApiKey: expayKey });
     expect(initial.json().values['bot.activationKeywords']).toContain('legado');
     expect(
       (

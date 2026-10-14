@@ -16,6 +16,7 @@ const dashboard = {
 };
 async function mockApi(page: Page, loggedIn = true) {
   const settings: Record<string, unknown> = {};
+  const secrets: Record<string, boolean> = {};
   await page.route('**/api/**', async (route) => {
     const req = route.request(),
       url = new URL(req.url());
@@ -54,10 +55,14 @@ async function mockApi(page: Page, loggedIn = true) {
         total: 1,
       };
     else if (url.pathname === '/api/settings') {
-      if (req.method() === 'PUT') Object.assign(settings, req.postDataJSON());
+      if (req.method() === 'PUT')
+        for (const [key, value] of Object.entries(req.postDataJSON())) {
+          if (key.startsWith('secret.')) secrets[key] = !!value;
+          else settings[key] = value;
+        }
       body = {
         values: settings,
-        secrets: {},
+        secrets,
         environment: {},
         rates: [],
         templates: [{ key: 'summary', label: 'Resumo do pedido', text: 'Total: R$ {valor}' }],
@@ -213,6 +218,7 @@ test('configura Expay e mantém a chave fora dos valores retornados', async ({ p
   await mockApi(page);
   await page.goto('/');
   await navigate(page, 'Configurações');
+  await page.getByLabel(/Partner API key/).fill('TEST-PARTNER-KEY-NEVER-REAL');
   await page.getByLabel('Gateway Pix').selectOption('expay');
   await page.getByLabel(/Chave de API Expay/).fill('TEST-EXPAY-KEY-NEVER-REAL');
   await page.getByLabel('ID da loja Expay (opcional)').fill('loja-teste');
@@ -224,8 +230,44 @@ test('configura Expay e mantém a chave fora dos valores retornados', async ({ p
     'pix.gateway': 'expay',
     'pix.expayStoreId': 'loja-teste',
     'secret.expayApiKey': 'TEST-EXPAY-KEY-NEVER-REAL',
+    'secret.partnerKey': 'TEST-PARTNER-KEY-NEVER-REAL',
   });
   await expect(page.getByLabel(/Chave de API Expay/)).toHaveValue('');
+  await expect(page.getByLabel(/Chave de API Expay/)).toHaveAttribute(
+    'placeholder',
+    'Chave salva — preencha apenas para substituir',
+  );
+  await expect(page.getByLabel('ID da loja Expay (opcional)')).toHaveValue('loja-teste');
+  await expect(page.getByLabel('Gateway Pix')).toHaveValue('expay');
+  await expect(page.getByLabel(/Access Token/)).not.toBeVisible();
+  await page.reload();
+  await navigate(page, 'Configurações');
+  await expect(page.getByLabel(/Partner API key/)).toHaveAttribute(
+    'placeholder',
+    'Chave salva — preencha apenas para substituir',
+  );
+  await expect(page.getByLabel(/Chave de API Expay/)).toHaveAttribute(
+    'placeholder',
+    'Chave salva — preencha apenas para substituir',
+  );
+  await expect(page.getByLabel('ID da loja Expay (opcional)')).toHaveValue('loja-teste');
+  const resave = page.waitForRequest(
+    (req) => req.method() === 'PUT' && req.url().endsWith('/settings'),
+  );
+  await page.getByRole('button', { name: 'Salvar integrações', exact: true }).click();
+  expect((await resave).postDataJSON()).toEqual({
+    'pix.gateway': 'expay',
+    'pix.expayStoreId': 'loja-teste',
+  });
+  await expect(page.getByLabel(/Partner API key/)).toHaveAttribute(
+    'placeholder',
+    'Chave salva — preencha apenas para substituir',
+  );
+  await page.screenshot({
+    path: `test-results/integrations-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
 });
 test('conecta WhatsApp com uma mutação protegida e mostra o pareamento retornado', async ({
   page,

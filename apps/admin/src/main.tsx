@@ -84,6 +84,7 @@ function Field({
   type = 'text',
   defaultValue = '',
   required = false,
+  placeholder,
   children,
 }: {
   label: string;
@@ -91,6 +92,7 @@ function Field({
   type?: string;
   defaultValue?: any;
   required?: boolean;
+  placeholder?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -102,6 +104,7 @@ function Field({
           type={type}
           defaultValue={defaultValue ?? ''}
           required={required}
+          placeholder={placeholder}
           autoComplete={type === 'password' ? 'new-password' : 'off'}
           step={type === 'number' ? 'any' : undefined}
         />
@@ -190,6 +193,7 @@ function App() {
   const loadSequence = useRef(0);
   const [filter, setFilter] = useState(''),
     [chartDays, setChartDays] = useState('30');
+  const [gatewayDraft, setGatewayDraft] = useState<string | null>(null);
   const report = useCallback((e: unknown) => {
     if (e instanceof HttpError && e.status === 401) setAdmin(null);
     setToast({ message: e instanceof Error ? e.message : String(e), error: true });
@@ -267,6 +271,7 @@ function App() {
     if (type === 'order' && row) void api(`/orders/${row.id}`).then(setDetail).catch(report);
   }
   function go(id: string) {
+    setGatewayDraft(null);
     loadSequence.current++;
     setData(null);
     setPage(id);
@@ -1136,7 +1141,8 @@ function App() {
                             className="stack"
                             onSubmit={async (e) => {
                               e.preventDefault();
-                              const f = new FormData(e.currentTarget);
+                              const form = e.currentTarget;
+                              const f = new FormData(form);
                               const payload: Row = {
                                 'pix.gateway': f.get('gateway'),
                                 'pix.expayStoreId': f.get('expayStore') || '',
@@ -1149,59 +1155,110 @@ function App() {
                               ])
                                 if (f.get(field)) payload[key] = f.get(field);
                               try {
-                                await act('/settings', 'PUT', payload);
-                                e.target instanceof HTMLFormElement && e.target.reset();
+                                await act(
+                                  '/settings',
+                                  'PUT',
+                                  payload,
+                                  'Integrações salvas. As chaves ficam ocultas e não precisam ser digitadas novamente.',
+                                );
+                                for (const name of ['partner', 'expayKey', 'token', 'webhook']) {
+                                  const input = form.elements.namedItem(name);
+                                  if (input instanceof HTMLInputElement) input.value = '';
+                                }
                               } catch {}
                             }}
                           >
+                            <div className="integration-note">
+                              <Shield size={18} />
+                              <p>
+                                As chaves salvas ficam ocultas.{' '}
+                                <strong>“Configurada” confirma que a chave está armazenada.</strong>{' '}
+                                Deixe o campo vazio para manter a chave atual; preencha somente para
+                                substituí-la.
+                              </p>
+                            </div>
                             <Field
                               name="partner"
                               type="password"
                               label={`Partner API key ${data.secrets['secret.partnerKey'] || data.environment.partnerKey ? '· Configurada' : '· Pendente'}`}
+                              placeholder={
+                                data.secrets['secret.partnerKey'] || data.environment.partnerKey
+                                  ? 'Chave salva — preencha apenas para substituir'
+                                  : 'Cole sua chave da Partner API'
+                              }
                             />
                             <Field name="gateway" label="Gateway Pix">
                               <select
                                 name="gateway"
-                                defaultValue={data.values['pix.gateway'] ?? 'disabled'}
+                                value={gatewayDraft ?? data.values['pix.gateway'] ?? 'disabled'}
+                                onChange={(e) => setGatewayDraft(e.target.value)}
                               >
                                 <option value="disabled">Desativado</option>
                                 <option value="expay">Expay Brasil</option>
                                 <option value="mercadopago">Mercado Pago</option>
                               </select>
                             </Field>
-                            <Field
-                              name="expayKey"
-                              type="password"
-                              label={`Chave de API Expay ${data.secrets['secret.expayApiKey'] || data.environment.expayApiKey ? '· Configurada' : '· Pendente'}`}
-                            />
-                            <Field
-                              name="expayStore"
-                              label="ID da loja Expay (opcional)"
-                              defaultValue={
-                                data.values['pix.expayStoreId'] ??
-                                data.environment.expayStoreId ??
-                                ''
+                            <div
+                              className="gateway-fields stack"
+                              hidden={(gatewayDraft ?? data.values['pix.gateway']) !== 'expay'}
+                            >
+                              <Field
+                                name="expayKey"
+                                type="password"
+                                label={`Chave de API Expay ${data.secrets['secret.expayApiKey'] || data.environment.expayApiKey ? '· Configurada' : '· Pendente'}`}
+                                placeholder={
+                                  data.secrets['secret.expayApiKey'] || data.environment.expayApiKey
+                                    ? 'Chave salva — preencha apenas para substituir'
+                                    : 'Cole sua chave de API Expay'
+                                }
+                              />
+                              <Field
+                                name="expayStore"
+                                label="ID da loja Expay (opcional)"
+                                defaultValue={
+                                  data.values['pix.expayStoreId'] ??
+                                  data.environment.expayStoreId ??
+                                  ''
+                                }
+                              />
+                              <p className="muted">
+                                Na Expay, configure o webhook da loja em /webhooks/pix/expay. O
+                                sistema também consulta os pagamentos automaticamente. Deixe chaves
+                                vazias para manter as credenciais.
+                              </p>
+                            </div>
+                            <div
+                              className="gateway-fields stack"
+                              hidden={
+                                (gatewayDraft ?? data.values['pix.gateway']) !== 'mercadopago'
                               }
-                            />
-                            <p className="muted">
-                              Na Expay, configure o webhook da loja em /webhooks/pix/expay. O
-                              sistema também consulta os pagamentos automaticamente. Deixe chaves
-                              vazias para manter as credenciais.
-                            </p>
-                            <Field
-                              name="token"
-                              type="password"
-                              label={`Access Token ${data.secrets['secret.mpToken'] || data.environment.mpToken ? '· Configurado' : '· Pendente'}`}
-                            />
-                            <Field
-                              name="webhook"
-                              type="password"
-                              label={`Segredo de webhook ${data.secrets['secret.mpWebhookSecret'] || data.environment.mpWebhookSecret ? '· Configurado' : '· Pendente'}`}
-                            />
-                            <p className="muted">
-                              Configure a URL de webhook no Mercado Pago: /webhooks/pix. Deixe os
-                              campos secretos vazios para manter as credenciais.
-                            </p>
+                            >
+                              <Field
+                                name="token"
+                                type="password"
+                                label={`Access Token ${data.secrets['secret.mpToken'] || data.environment.mpToken ? '· Configurado' : '· Pendente'}`}
+                                placeholder={
+                                  data.secrets['secret.mpToken'] || data.environment.mpToken
+                                    ? 'Token salvo — preencha apenas para substituir'
+                                    : 'Cole o Access Token do Mercado Pago'
+                                }
+                              />
+                              <Field
+                                name="webhook"
+                                type="password"
+                                label={`Segredo de webhook ${data.secrets['secret.mpWebhookSecret'] || data.environment.mpWebhookSecret ? '· Configurado' : '· Pendente'}`}
+                                placeholder={
+                                  data.secrets['secret.mpWebhookSecret'] ||
+                                  data.environment.mpWebhookSecret
+                                    ? 'Segredo salvo — preencha apenas para substituir'
+                                    : 'Cole o segredo de webhook do Mercado Pago'
+                                }
+                              />
+                              <p className="muted">
+                                Configure a URL de webhook no Mercado Pago: /webhooks/pix. Deixe os
+                                campos secretos vazios para manter as credenciais.
+                              </p>
+                            </div>
                             <button className="primary" disabled={busy}>
                               Salvar integrações
                             </button>
