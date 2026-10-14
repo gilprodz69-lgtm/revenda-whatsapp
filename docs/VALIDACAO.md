@@ -1,5 +1,15 @@
 # Registro de validação
 
+## Versão 1.0.1
+
+A [execução de 14/10/2026 no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38649960736), commit de código `6418ac5`, passou: 63 testes unitários, 32 de integração e 12 de interface desktop/celular (107 no total), TypeScript, build, auditoria npm, scripts Linux, imagens Docker e inicialização com saúde de PostgreSQL, Redis, migrations, administrador, API, worker, painel e Evolution. A configuração Caddy também foi validada.
+
+O smoke iniciou API e worker reais com PostgreSQL/Redis e desativou a varredura de recuperação. Duas respostas foram enviadas em 82 ms e 67 ms, sem duplicar os envios quando o webhook foi repetido. Evolution e Partner foram servidores HTTP simulados; esses números não medem a latência do WhatsApp real.
+
+Os cenários novos verificam grupos com remetente alternativo privado, rejeição no webhook e no worker, palavras-chave/frases, continuidade numérica e expiração de sessão, preservação de saudações antigas e edição autenticada no admin. O teste do updater usa um repositório Git descartável e serviços simulados: verifica backup antes da troca de versão, conservação de arquivos que representam configuração/dados/sessão/segredos, repetição da versão instalada e rejeição de alterações locais. Não substitui um teste de restauração do backup real na VPS. Nenhuma VPS foi acessada nesta atualização.
+
+## Validação inicial da versão 1.0.0
+
 Ambiente de desenvolvimento: Windows, Node 22.22.0. Docker Engine/WSL não estão instalados no host; localmente foi usado o CLI Compose para validar a configuração. Builds e inicialização de containers também são verificados pelo workflow no Ubuntu 24.04 do GitHub. Instalação numa VPS limpa e integrações com contas reais continuam pendentes.
 
 Verificações executadas em 14/10/2026:
