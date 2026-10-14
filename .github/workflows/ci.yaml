@@ -9,11 +9,11 @@ jobs:
         image: postgres:16.10-bookworm
         env: { POSTGRES_PASSWORD: test_only, POSTGRES_DB: revenda_test }
         ports: ['5432:5432']
-        options: --health-cmd 'pg_isready -U postgres' --health-interval 5s --health-timeout 5s --health-retries 12
+        options: --health-cmd="pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
       redis:
         image: redis:7.4.6-alpine
         ports: ['6379:6379']
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-timeout 5s --health-retries 12
+        options: --health-cmd="redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       DATABASE_URL: postgresql://postgres:test_only@localhost:5432/revenda_test
       REDIS_URL: redis://localhost:6379/15

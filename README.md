@@ -6,13 +6,13 @@ O contrato do fornecedor está em [docs/references/partner-api-docs.html](docs/r
 
 ## Instalação na VPS
 
-Ubuntu Server **24.04 LTS x86_64**, 2 vCPUs, 4 GB de RAM e 15 GB livres. O repositório é **privado**: tenha um token GitHub com acesso de leitura a `gilprodz69-lgtm/revenda-whatsapp`. Na sessão SSH da VPS, copie e execute **um único comando**:
+Ubuntu Server **24.04 LTS x86_64**, 2 vCPUs, 4 GB de RAM e 15 GB livres. O repositório é **público**, e a instalação não pede login ou token GitHub. Na sessão SSH da VPS, copie e execute **um único comando**:
 
 ```bash
-sudo bash -c 'set -euo pipefail; . /etc/os-release; [[ "$ID" = ubuntu && "$VERSION_ID" = 24.04 ]] || { echo "Use Ubuntu Server 24.04 LTS." >&2; exit 1; }; apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates git; d=/opt/revenda-whatsapp; u=https://github.com/gilprodz69-lgtm/revenda-whatsapp.git; if [[ ! -e "$d" ]]; then printf "Repositório privado: informe usuário GitHub e token com acesso de leitura. O token não será salvo.\n"; git -c credential.helper= -c credential.useHttpPath=true clone --branch v1.0.0 --single-branch "$u" "$d"; else [[ ! -L "$d" && -d "$d/.git" && "$(git -C "$d" remote get-url origin)" = "$u" ]] || { echo "Diretório existente não pertence a este projeto." >&2; exit 1; }; fi; exec bash "$d/scripts/install.sh"'
+bash -o pipefail -c 'curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | sudo bash'
 ```
 
-Quando o Git pedir `Username`, informe seu usuário GitHub; em `Password`, cole o **token**, não a senha da conta. O token não será salvo nem incluído na URL. A versão inicial é fixada na tag `v1.0.0`, e os arquivos ficam em `/opt/revenda-whatsapp`.
+O comando requer `curl` e `sudo`, normalmente disponíveis na imagem Ubuntu do provedor. A versão inicial é fixada na tag `v1.0.0`, e os arquivos ficam em `/opt/revenda-whatsapp`.
 
 O instalador solicita domínio, e-mail para HTTPS, e-mail do administrador e senha inicial com confirmação. Mostra o IPv4 público e o registro DNS **A** a criar; você pode fazer o apontamento enquanto a instalação continua. Instala Docker pelo repositório oficial, constrói os serviços, aplica migrations, preserva a porta SSH no UFW e configura backup criptografado diário. HTTPS é emitido automaticamente quando o DNS e as portas 80/443 estiverem acessíveis. Execuções repetidas preservam `.env`, bancos, volumes e contas existentes.
 

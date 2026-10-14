@@ -13,15 +13,16 @@ source /etc/os-release
 [[ -f package-lock.json ]] || error 'Clone o repositório completo, incluindo package-lock.json.'
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl gnupg openssl git ufw dnsutils python3 >/dev/null
-curl -fsSI --max-time 15 https://download.docker.com >/dev/null || error 'Sem acesso ao repositório oficial Docker.'
-if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
-	for pkg in docker.io podman-docker docker-compose docker-compose-v2; do
-		if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then error "Pacote conflitante $pkg encontrado. Revise a instalação Docker existente antes de continuar."; fi
-	done
-	install -m 0755 -d /etc/apt/keyrings
-	curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-	chmod a+r /etc/apt/keyrings/docker.asc
-	cat >/etc/apt/sources.list.d/docker.sources <<EOF
+install_docker() {
+	curl -fsSI --max-time 15 https://download.docker.com >/dev/null || error 'Sem acesso ao repositório oficial Docker.'
+	if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
+		for pkg in docker.io podman-docker docker-compose docker-compose-v2; do
+			if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then error "Pacote conflitante $pkg encontrado. Revise a instalação Docker existente antes de continuar."; fi
+		done
+		install -m 0755 -d /etc/apt/keyrings
+		curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+		chmod a+r /etc/apt/keyrings/docker.asc
+		cat >/etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
 Suites: noble
@@ -29,11 +30,12 @@ Components: stable
 Architectures: amd64
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
-	apt-get update -qq
-	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
-fi
-systemctl enable --now docker >/dev/null
-docker info >/dev/null || error 'Docker Engine indisponível.'
+		apt-get update -qq
+		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+	fi
+	systemctl enable --now docker >/dev/null
+	docker info >/dev/null || error 'Docker Engine indisponível.'
+}
 install -d -m 0700 secrets backups
 if [[ ! -f .env ]]; then
 	APP_DOMAIN=${APP_DOMAIN:-}
@@ -96,8 +98,9 @@ chown root:1000 secrets/admin-password
 [[ -f secrets/backup-passphrase ]] || openssl rand -hex 48 >secrets/backup-passphrase
 chmod 0600 secrets/backup-passphrase
 load_env
-dc config --quiet
 show_dns_instructions
+install_docker
+dc config --quiet
 # Keep the active SSH port before enabling the firewall; database/cache have no published ports.
 configure_ssh_firewall
 echo 'Baixando imagens fixadas e construindo backend/painel…'

@@ -6,17 +6,12 @@
 - Domínio ou subdomínio que você pode editar no provedor DNS, por exemplo `loja.seudominio.com`.
 - Acesso SSH com `sudo` ou como `root`. Execute em terminal interativo.
 - Libere TCP 80/443 no firewall do provedor, além da sua porta SSH.
-- Acesso ao repositório **privado** [gilprodz69-lgtm/revenda-whatsapp](https://github.com/gilprodz69-lgtm/revenda-whatsapp).
-
-## Token GitHub para a VPS
-
-Crie um [token de acesso com permissões específicas](https://github.com/settings/personal-access-tokens/new), com expiração, proprietário `gilprodz69-lgtm`, acesso somente a `revenda-whatsapp` e permissão **Contents: Read-only**. Metadata de leitura acompanha esse acesso. Se outra conta instalar, ela também precisa estar autorizada a ler o repositório; o token sozinho não concede acesso novo.
-
-O comando pede `Username` e `Password` na primeira clonagem. Informe seu usuário GitHub e use o token no campo `Password`, sem exibição na tela. Não use a senha da conta e não coloque o token em comandos, URLs, mensagens ou arquivos `.env`. A clonagem desativa os helpers de credenciais e não grava o token. Você precisará autenticar novamente para atualizações que busquem novas tags.
+- `curl` e `sudo`, normalmente já disponíveis na imagem Ubuntu do provedor.
+- O repositório [gilprodz69-lgtm/revenda-whatsapp](https://github.com/gilprodz69-lgtm/revenda-whatsapp) é **público**. Não é necessário usuário, senha ou token GitHub para instalar ou atualizar.
 
 ## Um comando
 
-Copie a linha de [INSTALL_VPS.txt](../INSTALL_VPS.txt) e execute na sessão SSH. Ela instala Git, baixa a tag `v1.0.0` e inicia o assistente em `/opt/revenda-whatsapp`. Você também pode gerar a linha com `node scripts/vps-command.cjs` no computador de desenvolvimento.
+Copie a linha de [INSTALL_VPS.txt](../INSTALL_VPS.txt) e execute na sessão SSH. Ela baixa o bootstrap público da tag `v1.0.0`, instala Git se necessário e inicia o assistente em `/opt/revenda-whatsapp`. As entradas do assistente são lidas do terminal, mesmo quando o bootstrap é baixado por um pipe. Você também pode gerar a linha com `node scripts/vps-command.cjs` no computador de desenvolvimento.
 
 O assistente pedirá:
 
@@ -55,7 +50,7 @@ Repetir o comando usa a pasta existente e mantém `.env`, bancos, volumes e cont
 sudo bash /opt/revenda-whatsapp/scripts/install.sh
 ```
 
-Para atualizar, execute `sudo bash /opt/revenda-whatsapp/scripts/update.sh vX.Y.Z` com uma tag realmente publicada. O Git volta a pedir acesso ao repositório privado quando necessário. Confira backup e compatibilidade em [operação](OPERACAO.md).
+Para atualizar, execute `sudo bash /opt/revenda-whatsapp/scripts/update.sh vX.Y.Z` com uma tag realmente publicada. Não é preciso autenticar no GitHub. Confira backup e compatibilidade em [operação](OPERACAO.md).
 
 As portas SSH são detectadas da sessão e de `sshd -T`. Se usar um encaminhamento incomum, informe explicitamente `SSH_PORT` ao executar o instalador; regras existentes do UFW são preservadas. Nenhuma porta de PostgreSQL, Redis ou Evolution é exposta publicamente.
 
