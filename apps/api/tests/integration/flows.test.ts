@@ -1,0 +1,682 @@
+import { beforeAll, beforeEach, afterAll, it, expect, vi, describe } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { db, redis, transaction } from '../../src/core/db.js';
+import { mutateWallet } from '../../src/modules/wallet.js';
+import { placeOrder, processOrder, refundOrder } from '../../src/modules/orders.js';
+import { createDeposit, reconcilePayment } from '../../src/modules/payments.js';
+import { prepareDeliveries, dispatchMessage } from '../../src/modules/messaging.js';
+import { processIncoming } from '../../src/modules/conversation.js';
+import { syncCatalog } from '../../src/modules/catalog.js';
+import { partner } from '../../src/integrations/partner.js';
+import { evolution } from '../../src/integrations/evolution.js';
+import { PartnerError } from '../../src/core/errors.js';
+import { encrypt } from '../../src/core/crypto.js';
+import { saveSetting } from '../../src/core/settings.js';
+import { buildApp } from '../../src/app.js';
+import {
+  incomingQueue,
+  orderQueue,
+  outgoingQueue,
+  maintenanceQueue,
+  paymentQueue,
+} from '../../src/core/queues.js';
+import type { PartnerProduct, PartnerOrder } from '../../src/integrations/partner-contract.js';
+import argon2 from 'argon2';
+import { createHmac } from 'node:crypto';
+import { Worker, Queue, QueueEvents } from 'bullmq';
+import { queueConnection } from '../../src/core/queues.js';
+import { recordEventFailure, retryEvent } from '../../src/modules/events.js';
+
+if (!process.env.DATABASE_URL?.includes('revenda_test'))
+  throw new Error('Integração exige banco isolado revenda_test.');
+const live: PartnerProduct = {
+  id: 42,
+  slug: 'product',
+  name: 'Produto de teste',
+  provider: { id: 3, key: 'gemini', name: 'Gemini' },
+  deliveryType: 'COUPON',
+  catalogPrice: '1.00',
+  yourPrice: '1.00',
+  currency: 'USD',
+  stock: { inStock: true, count: 100, maxQuantity: 100 },
+};
+let customerId: string;
+const external = (id: string, quantity = 1): PartnerOrder => ({
+  ok: true,
+  orderCode: `SO-${id}`,
+  externalOrderId: `wa-${id}`,
+  status: 'COMPLETED',
+  deliveryType: 'COUPON',
+  product: { slug: 'product', name: 'Produto' },
+  quantity,
+  unitPrice: '1.00',
+  totalCharged: String(quantity),
+  currency: 'USD',
+  ...(quantity === 1
+    ? { delivery: { code: 'TEST-COUPON' } }
+    : {
+        lines: Array.from({ length: quantity }, (_, i) => ({
+          orderCode: `SO-${id}-L${i}`,
+          code: `TEST-${i}`,
+        })),
+      }),
+});
+async function credit(amount = '100.00', key = randomUUID()) {
+  return transaction((tx) =>
+    mutateWallet(tx, {
+      customerId,
+      key,
+      kind: 'TEST_DEPOSIT',
+      availableDelta: amount,
+      reservedDelta: '0',
+      reference: 'test',
+      reason: 'Teste isolado',
+    }),
+  );
+}
+async function purchase(quantity = 1, key = randomUUID()) {
+  return placeOrder({
+    customerId,
+    instanceName: 'store',
+    slug: 'product',
+    quantity,
+    expectedTotalBrl: String(quantity * 10),
+    idempotencyKey: key,
+  });
+}
+beforeAll(async () => {
+  await db.$connect();
+  await redis.ping();
+});
+beforeEach(async () => {
+  vi.restoreAllMocks();
+  await db.$executeRawUnsafe(
+    'TRUNCATE "AdminSession","Admin","AuditLog","ApiRequestLog","WebhookEvent","Delivery","OrderAttempt","OrderItem","Order","Payment","LedgerEntry","Wallet","Message","Conversation","Customer","Product","Provider","WhatsappInstance","ExchangeRate","Setting" CASCADE',
+  );
+  await redis.flushdb();
+  await db.whatsappInstance.create({ data: { name: 'store', state: 'open' } });
+  const customer = await db.customer.create({
+    data: { phone: '5511999999999', name: 'Cliente', wallet: { create: {} } },
+  });
+  customerId = customer.id;
+  await db.provider.create({ data: { key: 'gemini', externalId: 3, name: 'Gemini' } });
+  await db.product.create({
+    data: {
+      slug: 'product',
+      externalId: 42,
+      name: 'Produto',
+      providerKey: 'gemini',
+      catalogPriceUsd: '1',
+      costUsd: '1',
+      deliveryType: 'COUPON',
+      stock: 100,
+      maxQuantity: 100,
+      available: true,
+      authorizedResale: true,
+      markupPercent: '100',
+      bulkTiers: [],
+      syncedAt: new Date(),
+    },
+  });
+  await db.exchangeRate.create({
+    data: {
+      usdBrl: '5',
+      source: 'test',
+      observedAt: new Date(),
+      expiresAt: new Date(Date.now() + 3600000),
+    },
+  });
+  vi.spyOn(partner, 'product').mockResolvedValue(live);
+  vi.spyOn(partner, 'health').mockResolvedValue({ ok: true, service: 'partner-api', version: 1 });
+  vi.spyOn(partner, 'balance').mockResolvedValue({ ok: true, balance: '1000', currency: 'USD' });
+  // No fetch reaches a real purchase/payment endpoint during integration tests.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.reject(new Error('Acesso externo proibido nos testes'))),
+  );
+});
+afterAll(async () => {
+  vi.unstubAllGlobals();
+  await Promise.all([
+    incomingQueue.close(),
+    orderQueue.close(),
+    outgoingQueue.close(),
+    maintenanceQueue.close(),
+    paymentQueue.close(),
+  ]);
+  await redis.quit();
+  await db.$disconnect();
+});
+describe('Ledger transacional, pedidos e recuperação', () => {
+  it('estorna uma única vez e impede envio pendente após o estorno', async () => {
+    await credit();
+    const order = await purchase();
+    vi.spyOn(partner, 'createOrder').mockResolvedValue(external(order.id));
+    await processOrder(order.id);
+    await prepareDeliveries();
+    await refundOrder(order.id, 'Devolução autorizada em teste', 'test-owner');
+    await refundOrder(order.id, 'Devolução autorizada em teste', 'test-owner');
+    expect(
+      (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+    ).toBe('100.00');
+    expect(await db.ledgerEntry.count({ where: { kind: 'REFUND' } })).toBe(1);
+    const delivery = await db.delivery.findFirstOrThrow();
+    const send = vi.spyOn(evolution, 'sendText');
+    await dispatchMessage(delivery.messageId!);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('credita o mesmo depósito uma única vez sob concorrência', async () => {
+    const key = randomUUID();
+    await Promise.all([credit('100', key), credit('100', key), credit('100', key)]);
+    expect(
+      (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+    ).toBe('100.00');
+    expect(await db.ledgerEntry.count()).toBe(1);
+  });
+  it('recusa duas reservas concorrentes que excedem o saldo', async () => {
+    await credit();
+    const result = await Promise.allSettled([purchase(6), purchase(6)]);
+    expect(result.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const wallet = await db.wallet.findUniqueOrThrow({ where: { customerId } });
+    expect(wallet.available.toFixed(2)).toBe('40.00');
+    expect(wallet.reserved.toFixed(2)).toBe('60.00');
+  });
+  it('repetir confirmação não cria novo pedido nem débito', async () => {
+    await credit();
+    const key = randomUUID();
+    const a = await purchase(1, key),
+      b = await purchase(1, key);
+    expect(a.id).toBe(b.id);
+    expect(await db.order.count()).toBe(1);
+    expect(await db.ledgerEntry.count({ where: { kind: 'RESERVE' } })).toBe(1);
+  });
+  it('não altera ledger já lançado', async () => {
+    await credit();
+    const row = await db.ledgerEntry.findFirstOrThrow();
+    await expect(
+      db.ledgerEntry.update({ where: { id: row.id }, data: { reason: 'alterado' } }),
+    ).rejects.toThrow();
+  });
+  it('conclui compra em lote e entrega todas as unidades uma vez', async () => {
+    await credit();
+    const order = await purchase(3);
+    vi.spyOn(partner, 'createOrder').mockResolvedValue(external(order.id, 3));
+    await processOrder(order.id);
+    await processOrder(order.id);
+    await prepareDeliveries();
+    await prepareDeliveries();
+    expect(await db.delivery.count()).toBe(3);
+    expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(3);
+    expect((await db.wallet.findUniqueOrThrow({ where: { customerId } })).reserved.toFixed(2)).toBe(
+      '0.00',
+    );
+    expect(await db.ledgerEntry.count({ where: { kind: 'CAPTURE' } })).toBe(1);
+  });
+  it('reconcilia timeout depois da compra externa sem comprar ou debitar de novo', async () => {
+    await credit();
+    const order = await purchase();
+    const create = vi
+      .spyOn(partner, 'createOrder')
+      .mockRejectedValue(new PartnerError('TRANSPORT_UNKNOWN', undefined, 503, true));
+    await expect(processOrder(order.id)).rejects.toThrow();
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('UNKNOWN');
+    vi.spyOn(partner, 'orders').mockResolvedValue({
+      data: [external(order.id)],
+      meta: { page: 1, limit: 100, total: 1, totalPages: 1 },
+    });
+    vi.spyOn(partner, 'order').mockResolvedValue(external(order.id));
+    await processOrder(order.id);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(await db.ledgerEntry.count({ where: { kind: 'CAPTURE' } })).toBe(1);
+  });
+  it('reusa o mesmo ID e corpo quando busca não encontra pedido após timeout', async () => {
+    await credit();
+    const order = await purchase();
+    const create = vi
+      .spyOn(partner, 'createOrder')
+      .mockRejectedValueOnce(new PartnerError('TRANSPORT_UNKNOWN', undefined, 503, true))
+      .mockResolvedValue(external(order.id));
+    await expect(processOrder(order.id)).rejects.toThrow();
+    vi.spyOn(partner, 'orders').mockResolvedValue({
+      data: [],
+      meta: { page: 1, limit: 100, total: 0, totalPages: 0 },
+    });
+    await processOrder(order.id);
+    expect(create.mock.calls[0]?.[0]).toEqual(create.mock.calls[1]?.[0]);
+  });
+  it('libera reserva em falta de estoque comprovada', async () => {
+    await credit();
+    const order = await purchase();
+    vi.mocked(partner.product).mockResolvedValue({
+      ...live,
+      stock: { inStock: false, count: 0, maxQuantity: 0 },
+    });
+    await processOrder(order.id);
+    const wallet = await db.wallet.findUniqueOrThrow({ where: { customerId } });
+    expect(wallet.available.toFixed(2)).toBe('100.00');
+    expect(wallet.reserved.toFixed(2)).toBe('0.00');
+  });
+  it('mantém a reserva quando fornecedor está indisponível', async () => {
+    await credit();
+    const order = await purchase();
+    vi.mocked(partner.health).mockRejectedValue(new PartnerError('MAINTENANCE', 'req-1', 503));
+    await expect(processOrder(order.id)).rejects.toThrow();
+    expect((await db.wallet.findUniqueOrThrow({ where: { customerId } })).reserved.toFixed(2)).toBe(
+      '10.00',
+    );
+  });
+  it('não reenvia automaticamente uma entrega com resultado incerto', async () => {
+    await credit();
+    const order = await purchase();
+    vi.spyOn(partner, 'createOrder').mockResolvedValue(external(order.id));
+    await processOrder(order.id);
+    await prepareDeliveries();
+    const message = await db.message.findFirstOrThrow({ where: { direction: 'OUT' } });
+    const send = vi.spyOn(evolution, 'sendText').mockRejectedValue(new Error('timeout'));
+    await expect(dispatchMessage(message.id)).rejects.toThrow();
+    await dispatchMessage(message.id);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await db.delivery.findFirstOrThrow()).status).toBe('UNKNOWN');
+  });
+  it('preserva a entrega pendente durante desconexão WhatsApp', async () => {
+    const m = await db.message.create({
+      data: {
+        key: 'test',
+        customerId,
+        instanceName: 'store',
+        direction: 'OUT',
+        encryptedText: encrypt('teste'),
+      },
+    });
+    await db.whatsappInstance.update({ where: { name: 'store' }, data: { state: 'close' } });
+    const send = vi.spyOn(evolution, 'sendText');
+    await dispatchMessage(m.id);
+    expect(send).not.toHaveBeenCalled();
+    expect((await db.message.findUniqueOrThrow({ where: { id: m.id } })).status).toBe('PENDING');
+  });
+});
+describe('Catálogo, webhooks e fluxo completo', () => {
+  it('reconstrói a navegação voltar e permite solicitar suporte em qualquer etapa', async () => {
+    for (const [i, text] of ['oi', '1', 'voltar', '1', '1', '1', 'suporte'].entries()) {
+      const event = await db.webhookEvent.create({
+        data: {
+          key: `back-${i}`,
+          source: 'evolution',
+          encryptedPayload: encrypt(
+            JSON.stringify({
+              instance: 'store',
+              data: {
+                key: { id: `back-${i}`, remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+                message: { conversation: text },
+              },
+            }),
+          ),
+        },
+      });
+      await processIncoming(event.id);
+      if (i === 2)
+        expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+    }
+    expect(
+      (await db.customer.findUniqueOrThrow({ where: { id: customerId } })).humanUntil?.getTime(),
+    ).toBeGreaterThan(Date.now());
+  });
+  it('encaminha evento esgotado para revisão e permite reprocessamento auditado', async () => {
+    const event = await db.webhookEvent.create({
+      data: { key: 'failed-event', source: 'evolution', encryptedPayload: encrypt('{}') },
+    });
+    await recordEventFailure(event.id, 'INTERNAL', true);
+    expect(
+      (await db.webhookEvent.findUniqueOrThrow({ where: { id: event.id } })).failedAt,
+    ).not.toBeNull();
+    await retryEvent(event.id, 'test-owner');
+    expect(
+      (await db.webhookEvent.findUniqueOrThrow({ where: { id: event.id } })).failedAt,
+    ).toBeNull();
+    expect(await incomingQueue.getJob(`event-${event.id}`)).not.toBeUndefined();
+    expect(await db.auditLog.count({ where: { action: 'event.retry' } })).toBe(1);
+  });
+  it('sincroniza sem destruir regras locais e desativa ausentes', async () => {
+    vi.spyOn(partner, 'providers').mockResolvedValue({ data: [live.provider] });
+    vi.spyOn(partner, 'products').mockResolvedValue({ data: [{ ...live, yourPrice: '2' }] });
+    await db.product.update({ where: { slug: 'product' }, data: { manualPrice: '25' } });
+    await syncCatalog();
+    const product = await db.product.findUniqueOrThrow({ where: { slug: 'product' } });
+    expect(product.manualPrice?.toFixed(2)).toBe('25.00');
+    expect(product.costUsd.toFixed(2)).toBe('2.00');
+    vi.mocked(partner.products).mockResolvedValue({ data: [] });
+    await syncCatalog();
+    expect(await db.product.count()).toBe(1);
+    expect((await db.product.findUniqueOrThrow({ where: { slug: 'product' } })).available).toBe(
+      false,
+    );
+  });
+  it('valida e deduplica webhook e ignora mensagens próprias', async () => {
+    const app = await buildApp();
+    const body = {
+      event: 'messages.upsert',
+      instance: 'store',
+      data: {
+        key: { id: 'w1', remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+        message: { conversation: 'oi' },
+      },
+    };
+    expect(
+      (await app.inject({ method: 'POST', url: '/webhooks/evolution', payload: body })).statusCode,
+    ).toBe(401);
+    for (let i = 0; i < 2; i++)
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/webhooks/evolution',
+            headers: { 'x-webhook-secret': process.env.WEBHOOK_SECRET },
+            payload: body,
+          })
+        ).statusCode,
+      ).toBe(202);
+    expect(await db.webhookEvent.count()).toBe(1);
+    await app.inject({
+      method: 'POST',
+      url: '/webhooks/evolution',
+      headers: { 'x-webhook-secret': process.env.WEBHOOK_SECRET },
+      payload: {
+        ...body,
+        data: { ...body.data, key: { ...body.data.key, id: 'own', fromMe: true } },
+      },
+    });
+    expect(await db.webhookEvent.count()).toBe(1);
+    await app.close();
+  });
+  it('navega da saudação até compra e entrega usando estado persistente e recuperação', async () => {
+    await credit();
+    for (const [i, text] of ['oi', '1', '1', '1', '1', '1'].entries()) {
+      const event = await db.webhookEvent.create({
+        data: {
+          key: `flow-${i}`,
+          source: 'evolution',
+          encryptedPayload: encrypt(
+            JSON.stringify({
+              instance: 'store',
+              data: {
+                key: { id: `flow-${i}`, remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+                message: { conversation: text },
+              },
+            }),
+          ),
+        },
+      });
+      await processIncoming(event.id);
+      await processIncoming(event.id);
+    }
+    expect(await db.order.count()).toBe(1);
+    expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(6);
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+    const order = await db.order.findFirstOrThrow();
+    vi.spyOn(partner, 'createOrder').mockResolvedValue(external(order.id));
+    await processOrder(order.id);
+    await prepareDeliveries();
+    const delivery = await db.delivery.findFirstOrThrow();
+    const send = vi.spyOn(evolution, 'sendText').mockResolvedValue({ key: { id: 'sent-test' } });
+    await dispatchMessage(delivery.messageId!);
+    expect(send.mock.calls[0]?.slice(0, 2)).toEqual(['store', '5511999999999']);
+    expect((await db.delivery.findFirstOrThrow()).status).toBe('SENT');
+  });
+  it('não credita Pix com valor ou referência divergente', async () => {
+    await saveSetting('pix.gateway', 'mercadopago');
+    await saveSetting('secret.mpToken', 'TEST-token-never-real', true);
+    const id = randomUUID();
+    await db.payment.create({
+      data: {
+        id,
+        customerId,
+        instanceName: 'store',
+        idempotencyKey: randomUUID(),
+        gateway: 'mercadopago',
+        gatewayId: '1',
+        amountBrl: '20',
+        encryptedRequestBody: encrypt('{}'),
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: 1,
+              external_reference: id,
+              transaction_amount: 200,
+              currency_id: 'BRL',
+              status: 'approved',
+              payment_method_id: 'pix',
+              live_mode: false,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+      ),
+    );
+    await expect(reconcilePayment('1')).rejects.toThrow('divergente');
+    expect(await db.ledgerEntry.count()).toBe(0);
+  });
+  it('confirma depósito Pix autenticado e protege contra crédito duplicado', async () => {
+    await saveSetting('pix.gateway', 'mercadopago');
+    await saveSetting('secret.mpToken', 'TEST-token-never-real', true);
+    let reference = '';
+    let approved = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, opts?: RequestInit) => {
+        if (opts?.method === 'POST') reference = JSON.parse(String(opts.body)).external_reference;
+        return new Response(
+          JSON.stringify({
+            id: 123,
+            external_reference: reference,
+            transaction_amount: 20,
+            currency_id: 'BRL',
+            status: approved ? 'approved' : 'pending',
+            payment_method_id: 'pix',
+            live_mode: false,
+            date_of_expiration: new Date(Date.now() + 3600000).toISOString(),
+            point_of_interaction: { transaction_data: { qr_code: 'PIX-CODE' } },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+    const payment = await createDeposit(
+      customerId,
+      'store',
+      '20',
+      { email: 'test@example.com', cpf: '52998224725' },
+      randomUUID(),
+    );
+    approved = true;
+    await Promise.all([reconcilePayment(payment.gatewayId!), reconcilePayment(payment.gatewayId!)]);
+    expect(
+      (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+    ).toBe('20.00');
+    expect(await db.ledgerEntry.count({ where: { kind: 'DEPOSIT' } })).toBe(1);
+  });
+});
+describe('Autenticação, filas e proteção de webhooks financeiros', () => {
+  it('retorna dashboard por período e filtros de catálogo com preços em Decimal', async () => {
+    await db.admin.create({
+      data: {
+        email: 'owner@test.example',
+        passwordHash: await argon2.hash('Test-password-12345'),
+        role: 'OWNER',
+      },
+    });
+    const app = await buildApp();
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: 'http://localhost:5173' },
+      payload: { email: 'owner@test.example', password: 'Test-password-12345' },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    const overview = await app.inject({
+      method: 'GET',
+      url: '/api/dashboard?days=7',
+      headers: { cookie },
+    });
+    expect(overview.statusCode).toBe(200);
+    expect(overview.json()).toMatchObject({ days: 7, customers: 1, revenue: '0', chart: [] });
+    const products = await app.inject({
+      method: 'GET',
+      url: '/api/products?filter=available',
+      headers: { cookie },
+    });
+    expect(products.statusCode).toBe(200);
+    expect(products.json().data[0].quote.unitSaleBrl).toBe('10.00');
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/products?filter=unauthorized',
+          headers: { cookie },
+        })
+      ).json().total,
+    ).toBe(0);
+    await app.close();
+  });
+  it('exige login, origem, CSRF e permissão financeira', async () => {
+    await db.admin.create({
+      data: {
+        email: 'op@test.example',
+        passwordHash: await argon2.hash('Test-password-12345'),
+        role: 'OPERATOR',
+      },
+    });
+    const app = await buildApp();
+    expect((await app.inject({ method: 'GET', url: '/api/customers' })).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          payload: { email: 'op@test.example', password: 'Test-password-12345' },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: 'http://localhost:5173' },
+      payload: { email: 'op@test.example', password: 'Test-password-12345' },
+    });
+    expect(login.statusCode).toBe(200);
+    const csrf = login.json().csrf;
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    const connect = vi.spyOn(evolution, 'connect').mockResolvedValue({ pairingCode: '1234-5678' });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/whatsapp/store/connect',
+          headers: { cookie, origin: 'http://localhost:5173' },
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/whatsapp/store/connect',
+          headers: { cookie, origin: 'http://localhost:5173', 'x-csrf-token': csrf },
+          payload: {},
+        })
+      ).json(),
+    ).toMatchObject({ pairingCode: '1234-5678' });
+    expect(connect).toHaveBeenCalledWith('store', undefined);
+    expect(login.cookies.find((c) => c.name === 'session')?.httpOnly).toBe(true);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/customers', headers: { cookie } })).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/customers/${customerId}/balance`,
+          headers: { cookie, origin: 'http://localhost:5173' },
+          payload: { amount: '10', reason: 'Teste de permissão', key: randomUUID() },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/customers/${customerId}/balance`,
+          headers: { cookie, origin: 'http://localhost:5173', 'x-csrf-token': csrf },
+          payload: { amount: '10', reason: 'Teste de permissão', key: randomUUID() },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/logout',
+          headers: { cookie, origin: 'http://localhost:5173', 'x-csrf-token': csrf },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/customers', headers: { cookie } })).statusCode,
+    ).toBe(401);
+    await app.close();
+  });
+  it('valida HMAC Pix e rejeita ID adulterado sem confiar no status enviado', async () => {
+    await saveSetting('pix.gateway', 'mercadopago');
+    await saveSetting('secret.mpWebhookSecret', 'test-secret-long-enough', true);
+    const app = await buildApp(),
+      ts = String(Math.floor(Date.now() / 1000));
+    const signature = createHmac('sha256', 'test-secret-long-enough')
+      .update(`id:123;request-id:r1;ts:${ts};`)
+      .digest('hex');
+    const headers = { 'x-signature': `ts=${ts},v1=${signature}`, 'x-request-id': 'r1' };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/webhooks/pix?data.id=123',
+          headers,
+          payload: { type: 'payment', data: { id: '124' }, status: 'approved' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/webhooks/pix?data.id=123',
+          headers,
+          payload: { type: 'payment', data: { id: '123' } },
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(await db.webhookEvent.count()).toBe(1);
+    expect(await db.ledgerEntry.count()).toBe(0);
+    await app.close();
+  });
+  it('executa job BullMQ real no Redis configurado', async () => {
+    const name = `test-${randomUUID()}`,
+      queue = new Queue(name, { connection: queueConnection }),
+      events = new QueueEvents(name, { connection: queueConnection });
+    const worker = new Worker(name, async (job) => job.data.value + 1, {
+      connection: queueConnection,
+    });
+    try {
+      await events.waitUntilReady();
+      const job = await queue.add('check', { value: 41 });
+      expect(await job.waitUntilFinished(events, 10000)).toBe(42);
+    } finally {
+      await worker.close();
+      await events.close();
+      await queue.close();
+    }
+  });
+});

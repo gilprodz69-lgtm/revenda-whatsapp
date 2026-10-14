@@ -1,0 +1,21 @@
+{
+ email {$ACME_EMAIL}
+ admin localhost:2019
+}
+{$APP_DOMAIN} {
+ encode zstd gzip
+ header {
+  Strict-Transport-Security "max-age=31536000"
+  X-Content-Type-Options nosniff
+  Referrer-Policy strict-origin-when-cross-origin
+  -Server
+ }
+ @backend path /api/* /webhooks/pix /health/*
+ handle @backend {
+  reverse_proxy api:3000
+ }
+ handle {
+  header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  reverse_proxy admin:8080
+ }
+}

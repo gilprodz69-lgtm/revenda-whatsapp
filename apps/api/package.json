@@ -1,0 +1,38 @@
+{
+  "name": "@revenda/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/server.js",
+    "worker": "node dist/worker.js",
+    "bootstrap": "node dist/bootstrap.js",
+    "db:generate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js generate",
+    "db:migrate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.0.2",
+    "@fastify/helmet": "13.0.2",
+    "@fastify/rate-limit": "10.3.0",
+    "@prisma/client": "6.19.0",
+    "argon2": "0.44.0",
+    "bullmq": "5.63.0",
+    "decimal.js": "10.6.0",
+    "dotenv": "17.2.3",
+    "fastify": "5.12.7",
+    "ioredis": "5.8.2",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.12",
+    "prisma": "6.19.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

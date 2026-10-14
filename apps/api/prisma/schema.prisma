@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum Role {
+  OWNER
+  OPERATOR
+  VIEWER
+}
+enum OrderStatus {
+  RESERVED
+  PROCESSING
+  UNKNOWN
+  COMPLETED
+  FAILED
+  REVIEW
+  REFUNDED
+}
+enum PaymentStatus {
+  CREATING
+  PENDING
+  APPROVED
+  EXPIRED
+  CANCELLED
+  REVIEW
+}
+enum SendStatus {
+  PENDING
+  SENDING
+  SENT
+  UNKNOWN
+  FAILED
+}
+model Admin {
+  id String @id @default(uuid())
+  email String @unique
+  passwordHash String
+  role Role @default(OPERATOR)
+  disabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  sessions AdminSession[]
+}
+model AdminSession {
+  id String @id
+  adminId String
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  csrfHash String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+model Customer {
+  id String @id @default(uuid())
+  phone String @unique
+  name String
+  blocked Boolean @default(false)
+  humanUntil DateTime?
+  optedInAt DateTime?
+  createdAt DateTime @default(now())
+  wallet Wallet?
+  orders Order[]
+  payments Payment[]
+  conversations Conversation[]
+  messages Message[]
+}
+model Wallet {
+  id String @id @default(uuid())
+  customerId String @unique
+  customer Customer @relation(fields: [customerId], references: [id])
+  available Decimal @default(0) @db.Decimal(18, 2)
+  reserved Decimal @default(0) @db.Decimal(18, 2)
+  entries LedgerEntry[]
+}
+model LedgerEntry {
+  id String @id @default(uuid())
+  walletId String
+  wallet Wallet @relation(fields: [walletId], references: [id])
+  key String @unique
+  kind String
+  availableDelta Decimal @db.Decimal(18, 2)
+  reservedDelta Decimal @db.Decimal(18, 2)
+  availableAfter Decimal @db.Decimal(18, 2)
+  reservedAfter Decimal @db.Decimal(18, 2)
+  reference String
+  reason String
+  createdAt DateTime @default(now())
+  @@index([walletId, createdAt])
+}
+model Provider {
+  key String @id
+  externalId Int @unique
+  name String
+  emoji String?
+  sortOrder Int @default(0)
+  products Product[]
+}
+model Product {
+  slug String @id
+  externalId Int @unique
+  code String?
+  name String
+  providerKey String
+  provider Provider @relation(fields: [providerKey], references: [key])
+  catalogPriceUsd Decimal @db.Decimal(18, 4)
+  costUsd Decimal @db.Decimal(18, 4)
+  deliveryType String
+  stock Int
+  maxQuantity Int
+  available Boolean
+  durationDays Int?
+  warrantyDays Int?
+  bulkTiers Json
+  description String?
+  instructions String?
+  syncedAt DateTime
+  active Boolean @default(true)
+  visible Boolean @default(true)
+  authorizedResale Boolean @default(false)
+  markupPercent Decimal @default(30) @db.Decimal(10, 4)
+  fixedMargin Decimal @default(0) @db.Decimal(18, 2)
+  manualPrice Decimal? @db.Decimal(18, 2)
+  promoPrice Decimal? @db.Decimal(18, 2)
+  promoUntil DateTime?
+  roundingStep Decimal @default(0.01) @db.Decimal(10, 2)
+  volumeDiscountPercent Decimal @default(0) @db.Decimal(10, 4)
+  volumeMinQuantity Int @default(10)
+  items OrderItem[]
+  @@index([providerKey, available, active])
+}
+model ExchangeRate {
+  id String @id @default(uuid())
+  usdBrl Decimal @db.Decimal(18, 8)
+  source String
+  observedAt DateTime
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  orders Order[]
+  @@index([expiresAt])
+}
+model Order {
+  id String @id @default(uuid())
+  idempotencyKey String @unique
+  externalOrderId String @unique
+  externalOrderCode String? @unique
+  customerId String
+  customer Customer @relation(fields: [customerId], references: [id])
+  instanceName String
+  status OrderStatus @default(RESERVED)
+  totalBrl Decimal @db.Decimal(18, 2)
+  estimatedCostUsd Decimal @db.Decimal(18, 4)
+  actualCostUsd Decimal? @db.Decimal(18, 4)
+  grossProfitBrl Decimal? @db.Decimal(18, 2)
+  exchangeRateId String
+  exchangeRate ExchangeRate @relation(fields: [exchangeRateId], references: [id])
+  usdBrl Decimal @db.Decimal(18, 8)
+  requestBody Json
+  reservationSettled Boolean @default(false)
+  errorCode String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+  items OrderItem[]
+  attempts OrderAttempt[]
+  deliveries Delivery[]
+  @@index([status, updatedAt])
+  @@index([customerId, createdAt])
+}
+model OrderItem {
+  id String @id @default(uuid())
+  orderId String
+  order Order @relation(fields: [orderId], references: [id])
+  productSlug String
+  product Product @relation(fields: [productSlug], references: [slug])
+  name String
+  quantity Int
+  unitSaleBrl Decimal @db.Decimal(18, 2)
+  unitCostUsd Decimal @db.Decimal(18, 4)
+}
+model OrderAttempt {
+  id String @id @default(uuid())
+  orderId String
+  order Order @relation(fields: [orderId], references: [id])
+  operation String
+  outcome String
+  requestId String?
+  errorCode String?
+  createdAt DateTime @default(now())
+  @@index([orderId, createdAt])
+}
+model Delivery {
+  id String @id @default(uuid())
+  orderId String
+  order Order @relation(fields: [orderId], references: [id])
+  lineCode String
+  type String
+  encryptedContent String
+  messageId String? @unique
+  status SendStatus @default(PENDING)
+  sentAt DateTime?
+  attempts Int @default(0)
+  @@unique([orderId, lineCode])
+}
+model Payment {
+  id String @id @default(uuid())
+  customerId String
+  customer Customer @relation(fields: [customerId], references: [id])
+  instanceName String
+  idempotencyKey String @unique
+  gateway String
+  gatewayId String? @unique
+  amountBrl Decimal @db.Decimal(18, 2)
+  status PaymentStatus @default(CREATING)
+  encryptedPixCode String?
+  encryptedQrImage String?
+  encryptedRequestBody String
+  expiresAt DateTime?
+  creditedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, updatedAt])
+}
+model WhatsappInstance {
+  name String @id
+  state String @default("close")
+  phone String?
+  botEnabled Boolean @default(true)
+  updatedAt DateTime @updatedAt
+  conversations Conversation[]
+  messages Message[]
+}
+model Conversation {
+  id String @id @default(uuid())
+  customerId String
+  customer Customer @relation(fields: [customerId], references: [id])
+  instanceName String
+  instance WhatsappInstance @relation(fields: [instanceName], references: [name])
+  state Json
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+  @@unique([customerId, instanceName])
+}
+model Message {
+  id String @id @default(uuid())
+  key String @unique
+  instanceName String
+  instance WhatsappInstance @relation(fields: [instanceName], references: [name])
+  customerId String
+  customer Customer @relation(fields: [customerId], references: [id])
+  direction String
+  encryptedText String
+  encryptedMedia String?
+  mediaType String?
+  fileName String?
+  status SendStatus @default(PENDING)
+  externalMessageId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([customerId, createdAt])
+}
+model WebhookEvent {
+  id String @id @default(uuid())
+  key String @unique
+  source String
+  encryptedPayload String
+  processedAt DateTime?
+  failedAt DateTime?
+  attempts Int @default(0)
+  errorCode String?
+  createdAt DateTime @default(now())
+  @@index([processedAt, createdAt])
+  @@index([failedAt, processedAt])
+}
+model AuditLog {
+  id String @id @default(uuid())
+  actorId String
+  action String
+  target String
+  metadata Json
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model ApiRequestLog {
+  id String @id @default(uuid())
+  service String
+  method String
+  route String
+  status Int?
+  code String?
+  requestId String?
+  durationMs Int
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model Setting {
+  key String @id
+  value Json
+  encrypted Boolean @default(false)
+  updatedAt DateTime @updatedAt
+}

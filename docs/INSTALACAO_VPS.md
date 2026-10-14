@@ -1,0 +1,71 @@
+# Instalação da Revenda WhatsApp na VPS
+
+## Antes de começar
+
+- VPS Ubuntu Server 24.04 LTS, x86_64, mínimo 2 vCPUs, 4 GB de RAM e 15 GB livres.
+- Domínio ou subdomínio que você pode editar no provedor DNS, por exemplo `loja.seudominio.com`.
+- Acesso SSH com `sudo` ou como `root`. Execute em terminal interativo.
+- Libere TCP 80/443 no firewall do provedor, além da sua porta SSH.
+- Acesso ao repositório **privado** [gilprodz69-lgtm/revenda-whatsapp](https://github.com/gilprodz69-lgtm/revenda-whatsapp).
+
+## Token GitHub para a VPS
+
+Crie um [token de acesso com permissões específicas](https://github.com/settings/personal-access-tokens/new), com expiração, proprietário `gilprodz69-lgtm`, acesso somente a `revenda-whatsapp` e permissão **Contents: Read-only**. Metadata de leitura acompanha esse acesso. Se outra conta instalar, ela também precisa estar autorizada a ler o repositório; o token sozinho não concede acesso novo.
+
+O comando pede `Username` e `Password` na primeira clonagem. Informe seu usuário GitHub e use o token no campo `Password`, sem exibição na tela. Não use a senha da conta e não coloque o token em comandos, URLs, mensagens ou arquivos `.env`. A clonagem desativa os helpers de credenciais e não grava o token. Você precisará autenticar novamente para atualizações que busquem novas tags.
+
+## Um comando
+
+Copie a linha de [INSTALL_VPS.txt](../INSTALL_VPS.txt) e execute na sessão SSH. Ela instala Git, baixa a tag `v1.0.0` e inicia o assistente em `/opt/revenda-whatsapp`. Você também pode gerar a linha com `node scripts/vps-command.cjs` no computador de desenvolvimento.
+
+O assistente pedirá:
+
+1. Domínio completo, sem `https://`, porta ou caminho.
+2. E-mail para emissão do certificado HTTPS.
+3. E-mail de login do administrador.
+4. Senha inicial com pelo menos 14 caracteres e confirmação, ambas sem exibição.
+
+Senhas de PostgreSQL/Redis e chaves de criptografia/webhooks são geradas automaticamente. As chaves Partner/Mercado Pago, a cotação e a conexão WhatsApp serão configuradas no painel após a instalação. Não é necessário expor a Evolution em outro domínio.
+
+## Apontamentos DNS
+
+O instalador mostra o IPv4 público obtido da VPS e o domínio informado. Cadastre:
+
+| Tipo | Nome | Valor |
+| --- | --- | --- |
+| A | `loja` (ou o domínio completo, conforme o painel DNS) | IPv4 público da VPS mostrado no terminal |
+
+Se usar o domínio principal, o campo Nome pode ser `@`. Se o IPv4 não puder ser detectado, use o IP público mostrado pelo provedor da VPS. NAT ou IPs de saída diferentes exigem o IP de entrada do servidor indicado pelo provedor. É possível informar o IP manualmente ao executar `sudo VPS_PUBLIC_IP=SEU_IPV4 bash /opt/revenda-whatsapp/scripts/install.sh`.
+
+No Cloudflare, use **Somente DNS** durante a emissão inicial do certificado. Remova AAAA antigo; use AAAA somente se o IPv6 realmente chegar à mesma VPS. Não crie CNAME em conjunto com A no mesmo nome. Caddy emite e renova HTTPS automaticamente. Pode fazer os apontamentos depois de iniciar a instalação: o proxy continua tentando obter o certificado e os dados existentes são preservados.
+
+Após propagar o DNS, verifique:
+
+```bash
+sudo bash /opt/revenda-whatsapp/scripts/healthcheck.sh
+```
+
+Abra `https://SEU_DOMINIO` e entre com o e-mail/senha definidos. Confira as etapas Partner, cotação, produtos, Pix e WhatsApp no [README](../README.md).
+
+## Repetir, atualizar e diagnosticar
+
+Repetir o comando usa a pasta existente e mantém `.env`, bancos, volumes e contas. Ele rejeita uma pasta que pertença a outro repositório e não busca silenciosamente uma versão mais nova. Para corrigir uma instalação interrompida:
+
+```bash
+sudo bash /opt/revenda-whatsapp/scripts/install.sh
+```
+
+Para atualizar, execute `sudo bash /opt/revenda-whatsapp/scripts/update.sh vX.Y.Z` com uma tag realmente publicada. O Git volta a pedir acesso ao repositório privado quando necessário. Confira backup e compatibilidade em [operação](OPERACAO.md).
+
+As portas SSH são detectadas da sessão e de `sshd -T`. Se usar um encaminhamento incomum, informe explicitamente `SSH_PORT` ao executar o instalador; regras existentes do UFW são preservadas. Nenhuma porta de PostgreSQL, Redis ou Evolution é exposta publicamente.
+
+Comandos úteis:
+
+```bash
+cd /opt/revenda-whatsapp
+sudo docker compose ps
+sudo docker compose logs --tail=100 proxy
+sudo bash scripts/healthcheck.sh
+```
+
+Instalação com contas reais, emissão de certificado e restauração de backup devem ser conferidas na VPS conforme [homologação](HOMOLOGACAO.md). O comando de instalação não realiza compras, pagamentos ou envio de WhatsApp para clientes.

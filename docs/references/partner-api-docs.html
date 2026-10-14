@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Partner API — Complete User Guide</title>
+  <style>
+    :root{--bg:#f6f8fb;--card:#fff;--text:#172033;--muted:#667085;--line:#e6eaf0;--brand:#2563eb;--code:#101828;--ok:#067647;--warn:#b54708;--bad:#b42318}
+    *{box-sizing:border-box}
+    body{font-family:Inter,Segoe UI,Arial,sans-serif;max-width:1180px;margin:0 auto;padding:28px 18px 80px;line-height:1.65;color:var(--text);background:var(--bg)}
+    .hero{background:linear-gradient(135deg,#0f172a,#1d4ed8);color:#fff;border-radius:24px;padding:34px;margin-bottom:22px;box-shadow:0 16px 40px rgba(15,23,42,.18)}
+    .hero p{max-width:900px;color:#dbeafe;margin:8px 0}
+    .pill{display:inline-block;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:4px 10px;margin:3px;font-size:13px}
+    section{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 8px 24px rgba(24,33,47,.055)}
+    h1,h2,h3,h4{line-height:1.25;color:#0f172a}
+    h1{font-size:34px;margin:0 0 10px}
+    h2{font-size:24px;margin:0 0 14px}
+    h3{font-size:18px;margin:22px 0 10px}
+    h4{font-size:15px;margin:16px 0 8px;color:#334155}
+    a{color:var(--brand)}
+    .muted{color:var(--muted);font-size:14px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    .card{border:1px solid var(--line);border-radius:14px;padding:16px;background:#fbfdff}
+    table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+    th,td{border:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}
+    th{background:#f2f6ff}
+    code,pre{background:var(--code);color:#e8f0ff;border-radius:10px;font-size:13px}
+    code{padding:2px 6px}
+    pre{padding:16px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+    .inline-code{background:#eef4ff;color:#1849a9;padding:2px 6px;border-radius:6px}
+    .warning{border-left:5px solid #f59e0b}
+    .danger{border-left:5px solid #ef4444}
+    .success{border-left:5px solid #12b76a}
+    .info{border-left:5px solid #3b82f6}
+    .toc a{display:block;padding:4px 0;text-decoration:none;font-size:14px}
+    ol,ul{padding-left:22px}
+    li{margin:6px 0}
+    .step{display:flex;gap:12px;margin:12px 0;align-items:flex-start}
+    .step-num{flex:0 0 28px;height:28px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+    hr{border:none;border-top:1px solid var(--line);margin:24px 0}
+  </style>
+</head>
+<body>
+
+  <div class="hero">
+    <span class="pill">Partner API v1</span>
+    <span class="pill">Base path: /api/partner/v1</span>
+    <span class="pill">Currency: USD</span>
+    <span class="pill">Delivery: LINK · COUPON · READY_ACCOUNT</span>
+    <h1>Partner API — Complete User Guide</h1>
+    <p>Sell instant-delivery products (links, coupon codes, ready accounts) from your website, store, or external bot. Orders are fulfilled from live inventory and charged from the same Telegram bot wallet balance.</p>
+    <p><b>API language:</b> English for paths, field names, messages, and error codes.</p>
+    <p class="muted" style="color:#bfdbfe">Live API base URL: <code>https://ggsoma.store/api/partner/v1</code></p>
+  </div>
+
+  <section class="info">
+    <h2>Production connection</h2>
+    <p>Use this base URL in all HTTP requests (health check, catalog, orders, usage):</p>
+    <pre>https://ggsoma.store/api/partner/v1</pre>
+    <p class="muted">Example health check (no auth): <code>https://ggsoma.store/api/partner/v1/health</code></p>
+    <p class="muted">Admin panel for operators is separate and not part of Partner API: <code>/ggsomapanel/web</code> on the same domain.</p>
+  </section>
+
+  <section class="toc">
+    <h2>Table of Contents</h2>
+    <div class="grid">
+      <div>
+        <a href="#overview">1. Overview</a>
+        <a href="#quick-start">2. Quick Start</a>
+        <a href="#bot-keys">3. API Keys in Telegram Bot</a>
+        <a href="#auth">4. Authentication (HTTP)</a>
+        <a href="#wallet">5. Balance &amp; Wallet</a>
+      </div>
+      <div>
+        <a href="#responses">6. Responses &amp; Errors</a>
+        <a href="#rate-limits">7. Rate Limits</a>
+        <a href="#endpoints">8. Endpoint Reference</a>
+        <a href="#catalog">9. Catalog Guide</a>
+      </div>
+      <div>
+        <a href="#orders">10. Order Creation</a>
+        <a href="#order-shape">11. Order Response Shape</a>
+        <a href="#queries">12. Orders &amp; Usage Queries</a>
+        <a href="#scenarios">13. Practical Scenarios</a>
+      </div>
+      <div>
+        <a href="#errors">14. Error Reference</a>
+        <a href="#best-practices">15. Best Practices</a>
+        <a href="#checklist">16. Integration Checklist</a>
+        <a href="#faq">17. FAQ</a>
+        <a href="#curl">18. cURL Appendix</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1. OVERVIEW -->
+  <section id="overview">
+    <h2>1. Overview</h2>
+    <p>Partner API is a REST JSON API for <b>resellers</b>. You integrate it into your shop; when your customer pays you, your backend calls <code class="inline-code">POST /orders</code> and receives instant delivery content.</p>
+    <div class="grid">
+      <div class="card"><b>Catalog</b><br/>List providers and products with stock, pricing, warranty, duration, bulk tiers, and delivery type.</div>
+      <div class="card"><b>Orders</b><br/>Create orders by <code>productId</code>, <code>productSlug</code>, or <code>productCode</code>.</div>
+      <div class="card"><b>Delivery</b><br/>Receive a link, coupon code, or ready-account credentials immediately on success.</div>
+      <div class="card"><b>Usage</b><br/>Track balance, API order count, spend, request volume, and errors.</div>
+    </div>
+
+    <h3>Supported delivery types</h3>
+    <table>
+      <tr><th>Type</th><th>Description</th><th>Response field</th><th>Notes</th></tr>
+      <tr><td><code>LINK</code></td><td>Activation or subscription URL</td><td><code>delivery.link</code></td><td>Usually safe to forward to your customer.</td></tr>
+      <tr><td><code>COUPON</code></td><td>Redeemable code</td><td><code>delivery.code</code></td><td>Deliver once; do not log publicly.</td></tr>
+      <tr><td><code>READY_ACCOUNT</code></td><td>Login credentials (email/password, etc.)</td><td><code>delivery.content</code></td><td><b>Sensitive.</b> Never log or expose in client-side code.</td></tr>
+    </table>
+    <p class="muted">Seat subscriptions, manual activation workflows, and other non-inventory delivery types are <b>not</b> exposed via Partner API.</p>
+
+    <h3>Shared account model</h3>
+    <ul>
+      <li><b>Same Telegram user account</b> as the main bot.</li>
+      <li><b>Same wallet balance</b> — deposits in the bot fund API purchases.</li>
+      <li>API orders are stored in <code>service_orders</code> with internal source tag <code>partner_api</code> (not returned in API responses).</li>
+      <li><code>GET /orders</code> returns <b>API orders only</b>, not all bot purchases.</li>
+      <li>The bot’s “My orders” screen shows everything (bot + API).</li>
+    </ul>
+  </section>
+
+  <!-- 2. QUICK START -->
+  <section id="quick-start">
+    <h2>2. Quick Start</h2>
+
+    <div class="step"><span class="step-num">1</span><div><b>Open the Telegram bot</b> → main menu → press <b>API</b> (🔑).</div></div>
+    <div class="step"><span class="step-num">2</span><div><b>Create an API key</b> → enter a name (e.g. <code>Production</code>) → confirm. Copy the full key from the detail screen.</div></div>
+    <div class="step"><span class="step-num">3</span><div><b>Fund your balance</b> via the bot (Binance, on-chain, etc.). Bot balance = API balance.</div></div>
+    <div class="step"><span class="step-num">4</span><div><b>Call the API</b> from your server with <code>Authorization: Bearer YOUR_KEY</code>.</div></div>
+    <div class="step"><span class="step-num">5</span><div><b>Place your first order</b> with a unique <code>externalOrderId</code> from your shop.</div></div>
+
+    <h3>Minimal integration script</h3>
+    <pre>API="https://ggsoma.store/api/partner/v1"
+KEY="sk_live_YOUR_SECRET_KEY"
+AUTH="Authorization: Bearer $KEY"
+
+# Health (no auth)
+curl -s "$API/health"
+
+# Balance
+curl -s "$API/balance" -H "$AUTH"
+
+# Products
+curl -s "$API/catalog/products?provider=gemini" -H "$AUTH"
+
+# Create order
+curl -s -X POST "$API/orders" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"productSlug":"gemini-pro-monthly","quantity":1,"externalOrderId":"shop-order-1001"}'</pre>
+    <p class="muted">Replace <code>YOUR_SECRET_KEY</code> with the key from the Telegram bot. The base URL <code>https://ggsoma.store/api/partner/v1</code> is injected when you download this file from the bot.</p>
+  </section>
+
+  <!-- 3. BOT KEYS -->
+  <section id="bot-keys" class="info">
+    <h2>3. API Keys in the Telegram Bot</h2>
+    <p>Keys are created and managed inside the bot — not via HTTP. This keeps secrets out of admin panels and gives you a simple UI.</p>
+
+    <h3>Creating a key</h3>
+    <ol>
+      <li>API hub → <b>Create key</b>.</li>
+      <li>Send a <b>key name</b> (2–40 characters: letters, numbers, spaces, <code>.</code> <code>_</code> <code>-</code>).</li>
+      <li>Confirm → the full secret is shown on the key detail screen (copyable).</li>
+    </ol>
+
+    <h3>My keys</h3>
+    <ul>
+      <li>API hub → <b>My keys</b> → tap a key name to open details.</li>
+      <li>The full key is displayed in a copyable block (private chat only).</li>
+      <li>Maximum <b>3 active keys</b> per account (admin-configurable).</li>
+    </ul>
+
+    <h3>Regenerate</h3>
+    <p>On the key detail screen → <b>Regenerate</b> → confirm. The old secret stops working immediately; update your integration with the new key.</p>
+    <p class="warning card"><b>Legacy keys</b> created before encrypted bot storage was enabled cannot display the full secret. Use <b>Regenerate</b> once to get a new viewable key.</p>
+
+    <h3>Key format</h3>
+    <pre>sk_live_a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12</pre>
+    <table>
+      <tr><th>Rule</th><th>Details</th></tr>
+      <tr><td>Prefix</td><td><code>sk_live_</code> required</td></tr>
+      <tr><td>HTTP usage</td><td><code>Authorization: Bearer sk_live_...</code></td></tr>
+      <tr><td>Server storage</td><td>Only a hash is stored server-side for validation</td></tr>
+      <tr><td>Bot display</td><td>Encrypted copy stored for viewing in Telegram private chat</td></tr>
+      <tr><td>Revocation</td><td>Admin can revoke from admin panel; use Regenerate for self-service rotation</td></tr>
+    </table>
+  </section>
+
+  <!-- 4. AUTH -->
+  <section id="auth" class="warning">
+    <h2>4. Authentication (HTTP)</h2>
+    <p>Every protected endpoint requires a Bearer token. Keep the key on your <b>backend only</b>. Never embed it in frontend JavaScript, mobile apps, public Git repos, screenshots, or browser local storage.</p>
+    <pre>Authorization: Bearer sk_live_YOUR_SECRET_KEY</pre>
+
+    <h3>Missing or invalid key</h3>
+    <pre>GET https://ggsoma.store/api/partner/v1/balance</pre>
+    <pre>{
+  "ok": false,
+  "error": {
+    "code": "INVALID_API_KEY",
+    "message": "Missing API key. Use Authorization: Bearer &lt;key&gt;.",
+    "requestId": "req_a1b2c3d4e5f67890"
+  }
+}</pre>
+    <p><b>HTTP 401 Unauthorized</b></p>
+  </section>
+
+  <!-- 5. WALLET -->
+  <section id="wallet">
+    <h2>5. Balance &amp; Wallet Model</h2>
+    <ul>
+      <li>Currency is always <b>USD</b>.</li>
+      <li>API orders deduct from the same bot wallet balance.</li>
+      <li>Charges apply <b>only when order creation succeeds</b>.</li>
+      <li><code class="inline-code">yourPrice</code> in catalog = your effective reseller unit price (after loyalty/campaign discounts when applicable).</li>
+      <li>Bulk orders (<code>quantity &gt; 1</code>) charge once and return multiple <code>lines[]</code> delivery items.</li>
+      <li><code class="inline-code">balanceAfter</code> appears only on successful <code>POST /orders</code> (see §11).</li>
+    </ul>
+    <pre>{
+  "ok": true,
+  "balance": "125.50",
+  "currency": "USD"
+}</pre>
+  </section>
+
+  <!-- 6. RESPONSES -->
+  <section id="responses">
+    <h2>6. Response Format &amp; Errors</h2>
+    <h3>Success</h3>
+    <p>Most successful responses include <code>"ok": true</code>. Catalog list endpoints return <code>{ "data": [...] }</code>.</p>
+
+    <h3>Standard error shape</h3>
+    <pre>{
+  "ok": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable English message.",
+    "requestId": "req_abc123",
+    "required": 12.5,
+    "balance": 3.2
+  }
+}</pre>
+    <table>
+      <tr><th>Field</th><th>Purpose</th></tr>
+      <tr><td><code>code</code></td><td>Machine-readable — branch your integration logic on this.</td></tr>
+      <tr><td><code>message</code></td><td>English explanation for logs or admin UI.</td></tr>
+      <tr><td><code>requestId</code></td><td>Trace ID — send to support when reporting issues.</td></tr>
+      <tr><td>Extra fields</td><td>Context-specific (e.g. <code>required</code> + <code>balance</code> on insufficient funds).</td></tr>
+    </table>
+  </section>
+
+  <!-- 7. RATE LIMITS -->
+  <section id="rate-limits">
+    <h2>7. Rate Limits</h2>
+    <p>Applied per API key in a <b>one-minute sliding window</b>.</p>
+    <table>
+      <tr><th>Tier</th><th>Requests / minute</th><th>Order requests / minute</th></tr>
+      <tr><td><code>standard</code> (default)</td><td>60</td><td>10</td></tr>
+      <tr><td><code>limited</code></td><td>10</td><td>2</td></tr>
+      <tr><td><code>premium</code></td><td>300</td><td>50</td></tr>
+    </table>
+    <pre>{
+  "ok": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded. Try again later.",
+    "requestId": "req_..."
+  }
+}</pre>
+    <p><b>HTTP 429 Too Many Requests</b> — use exponential backoff.</p>
+  </section>
+
+  <!-- 8. ENDPOINTS -->
+  <section id="endpoints">
+    <h2>8. Endpoint Reference</h2>
+    <table>
+      <tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr>
+      <tr><td>GET</td><td><code>/health</code></td><td>No</td><td>Service status and maintenance flag.</td></tr>
+      <tr><td>GET</td><td><code>/balance</code></td><td>Yes</td><td>Current USD balance.</td></tr>
+      <tr><td>GET</td><td><code>/catalog/providers</code></td><td>Yes</td><td>Provider list with emoji metadata.</td></tr>
+      <tr><td>GET</td><td><code>/catalog/products</code></td><td>Yes</td><td>Product catalog (<code>?provider=gemini</code> optional).</td></tr>
+      <tr><td>GET</td><td><code>/catalog/products/:ref</code></td><td>Yes</td><td>Single product — <code>:ref</code> = numeric id or slug.</td></tr>
+      <tr><td>POST</td><td><code>/orders</code></td><td>Yes</td><td>Create order (idempotent via <code>externalOrderId</code>).</td></tr>
+      <tr><td>GET</td><td><code>/orders</code></td><td>Yes</td><td>List API orders (paginated, filterable).</td></tr>
+      <tr><td>GET</td><td><code>/orders/:orderCode</code></td><td>Yes</td><td>Order detail + delivery content.</td></tr>
+      <tr><td>GET</td><td><code>/usage</code></td><td>Yes</td><td>Account usage statistics.</td></tr>
+    </table>
+
+    <h3>GET /health</h3>
+    <pre>{ "ok": true, "service": "partner-api", "version": 1 }</pre>
+    <h4>During maintenance</h4>
+    <pre>{ "ok": false, "service": "partner-api", "version": 1, "error": "maintenance" }</pre>
+    <p>Protected routes return <b>503</b> with <code>MAINTENANCE</code> while maintenance mode is active.</p>
+  </section>
+
+  <!-- 9. CATALOG -->
+  <section id="catalog">
+    <h2>9. Catalog Guide</h2>
+
+    <h3>GET /catalog/providers</h3>
+    <pre>{
+  "data": [
+    {
+      "id": 3,
+      "key": "gemini",
+      "name": "Gemini",
+      "sortOrder": 10,
+      "emoji": {
+        "normal": "✨",
+        "customTelegramId": "1234567890123456789",
+        "display": "✨ Gemini"
+      }
+    }
+  ]
+}</pre>
+    <table>
+      <tr><th>emoji field</th><th>Description</th></tr>
+      <tr><td><code>normal</code></td><td>Unicode emoji from bot button config.</td></tr>
+      <tr><td><code>customTelegramId</code></td><td>Telegram custom emoji ID (Telegram UI only).</td></tr>
+      <tr><td><code>display</code></td><td>Ready label: <code>{normal} {name}</code>.</td></tr>
+    </table>
+
+    <h3>GET /catalog/products?provider=gemini</h3>
+    <pre>{
+  "data": [
+    {
+      "id": 42,
+      "slug": "gemini-pro-monthly",
+      "productCode": "GEM-PRO-30",
+      "name": "Gemini Pro — 30 days",
+      "provider": {
+        "id": 3,
+        "key": "gemini",
+        "name": "Gemini",
+        "emoji": { "normal": "✨", "customTelegramId": null, "display": "✨ Gemini" }
+      },
+      "emoji": { "normal": "✨", "customTelegramId": null, "display": "✨ Gemini Pro — 30 days" },
+      "deliveryType": "LINK",
+      "sortOrder": 1,
+      "catalogPrice": "15.00",
+      "yourPrice": "12.50",
+      "currency": "USD",
+      "durationDays": 30,
+      "warranty": { "enabled": true, "days": 7 },
+      "stock": { "inStock": true, "count": 48, "maxQuantity": 48 },
+      "bulkDiscount": {
+        "enabled": true,
+        "stackingPolicy": "BEST_PRICE",
+        "tiers": [
+          { "minQuantity": 5, "maxQuantity": 9, "unitPrice": "11.50" },
+          { "minQuantity": 10, "maxQuantity": null, "unitPrice": "10.00" }
+        ]
+      },
+      "pricing": {
+        "catalogPrice": "15.00",
+        "yourUnitPrice": "12.50",
+        "loyaltyApplied": true,
+        "campaignApplied": false
+      },
+      "flags": {
+        "sensitiveDelivery": false,
+        "hasInstructions": true,
+        "instantDelivery": true
+      }
+    }
+  ]
+}</pre>
+
+    <h3>GET /catalog/products/:ref</h3>
+    <p>Same product card plus description fields:</p>
+    <pre>{
+  "id": 42,
+  "slug": "gemini-pro-monthly",
+  "name": "Gemini Pro — 30 days",
+  "description": "Instant Gemini Pro activation link.",
+  "descriptionFormat": "HTML",
+  "instructions": "Open the link and sign in with your Google account.",
+  "updatedAt": "2026-06-15T10:00:00.000Z"
+}</pre>
+
+    <h3>Important catalog fields</h3>
+    <table>
+      <tr><th>Field</th><th>Use in your integration</th></tr>
+      <tr><td><code>id</code> / <code>slug</code> / <code>productCode</code></td><td>Identify product when placing orders (one required).</td></tr>
+      <tr><td><code>yourPrice</code></td><td>Your actual unit cost — use for pricing your customers.</td></tr>
+      <tr><td><code>stock.inStock</code></td><td>Can this product be sold right now?</td></tr>
+      <tr><td><code>stock.maxQuantity</code></td><td>Safe max per order (also capped by inventory).</td></tr>
+      <tr><td><code>bulkDiscount.tiers</code></td><td>Volume unit prices when <code>quantity &gt; 1</code>.</td></tr>
+      <tr><td><code>flags.sensitiveDelivery</code></td><td><code>true</code> for READY_ACCOUNT — handle with care.</td></tr>
+    </table>
+
+    <p class="muted"><b>Not exposed:</b> provider cost, admin notes, raw inventory content before purchase. Globally hidden or trader-blocked products do not appear in your catalog.</p>
+  </section>
+
+  <!-- 10. ORDERS -->
+  <section id="orders">
+    <h2>10. Order Creation — POST /orders</h2>
+
+    <h3>Request body</h3>
+    <table>
+      <tr><th>Field</th><th>Required</th><th>Description</th></tr>
+      <tr><td><code>externalOrderId</code></td><td><b>Yes</b></td><td>Your shop’s unique order ID — drives idempotency.</td></tr>
+      <tr><td><code>productId</code></td><td>One of three</td><td>Numeric product id.</td></tr>
+      <tr><td><code>productSlug</code></td><td>One of three</td><td>Stable slug (recommended).</td></tr>
+      <tr><td><code>productCode</code></td><td>One of three</td><td>Internal product code.</td></tr>
+      <tr><td><code>quantity</code></td><td>No (default 1)</td><td>Max configurable (default 50); also limited by stock.</td></tr>
+    </table>
+
+    <h3>externalOrderId rules</h3>
+    <ul>
+      <li>Required on every order.</li>
+      <li>Must be unique per trader account.</li>
+      <li>Use your real shop order id: <code>woo-10452</code>, UUID, <code>shop-{timestamp}</code>, etc.</li>
+      <li>Retry safe: same id + same body → same order, no double charge.</li>
+    </ul>
+
+    <h3>Example — LINK order</h3>
+    <pre>POST https://ggsoma.store/api/partner/v1/orders
+Authorization: Bearer sk_live_...
+Content-Type: application/json
+
+{
+  "productSlug": "gemini-pro-monthly",
+  "quantity": 1,
+  "externalOrderId": "shop-order-1001"
+}</pre>
+
+    <h3>Example — COUPON response (abbreviated)</h3>
+    <pre>{
+  "ok": true,
+  "orderCode": "SO-20260617-D4E5F6",
+  "deliveryType": "COUPON",
+  "delivery": { "code": "CAPCUT-XXXX-YYYY-ZZZZ", "instructions": "Redeem within 24 hours." }
+}</pre>
+
+    <h3>Example — READY_ACCOUNT response</h3>
+    <pre>{
+  "ok": true,
+  "orderCode": "SO-20260617-G7H8I9",
+  "deliveryType": "READY_ACCOUNT",
+  "delivery": { "content": "email@example.com\npassword123", "format": "plain" }
+}</pre>
+
+    <h3>Bulk order (quantity &gt; 1)</h3>
+    <pre>{
+  "productSlug": "capcut-pro-coupon",
+  "quantity": 3,
+  "externalOrderId": "shop-bulk-2001"
+}</pre>
+    <pre>{
+  "ok": true,
+  "orderCode": "SO-20260617-BULK01",
+  "externalOrderId": "shop-bulk-2001",
+  "status": "COMPLETED",
+  "deliveryType": "COUPON",
+  "quantity": 3,
+  "unitPrice": "8.00",
+  "totalCharged": "24.00",
+  "currency": "USD",
+  "balanceAfter": "89.00",
+  "lines": [
+    { "orderCode": "SO-20260617-BULK01-L1", "code": "COUPON-AAA-111" },
+    { "orderCode": "SO-20260617-BULK01-L2", "code": "COUPON-BBB-222" },
+    { "orderCode": "SO-20260617-BULK01-L3", "code": "COUPON-CCC-333" }
+  ]
+}</pre>
+    <p class="muted">Top-level <code>delivery</code> is omitted for bulk orders — use <code>lines[]</code>. Each line has its own <code>orderCode</code>.</p>
+  </section>
+
+  <!-- 11. ORDER SHAPE -->
+  <section id="order-shape" class="info">
+    <h2>11. Unified Order Response Shape</h2>
+    <p><code>POST /orders</code>, idempotent retry, and <code>GET /orders/:orderCode</code> share the same core fields.</p>
+
+    <h3>Full example — POST /orders (LINK, first create)</h3>
+    <pre>{
+  "ok": true,
+  "orderCode": "SO-20260617-A1B2C3",
+  "externalOrderId": "shop-order-1001",
+  "status": "COMPLETED",
+  "deliveryType": "LINK",
+  "product": {
+    "slug": "gemini-pro-monthly",
+    "name": "Gemini Pro — 30 days",
+    "productCode": "GEM-PRO-30"
+  },
+  "quantity": 1,
+  "unitPrice": "12.50",
+  "totalCharged": "12.50",
+  "currency": "USD",
+  "balanceAfter": "113.00",
+  "delivery": {
+    "link": "https://example.com/activate/xyz123",
+    "instructions": "Open the link and sign in with your Google account."
+  }
+}</pre>
+
+    <h3>Field reference</h3>
+    <table>
+      <tr><th>Field</th><th>POST create</th><th>Idempotent retry</th><th>GET detail</th><th>Notes</th></tr>
+      <tr><td><code>ok</code></td><td>✓</td><td>✓</td><td>✓</td><td></td></tr>
+      <tr><td><code>orderCode</code></td><td>✓</td><td>✓</td><td>✓</td><td>Platform order reference.</td></tr>
+      <tr><td><code>externalOrderId</code></td><td>✓</td><td>✓</td><td>✓</td><td>Your shop id.</td></tr>
+      <tr><td><code>status</code></td><td>✓</td><td>✓</td><td>✓</td><td>e.g. <code>COMPLETED</code>.</td></tr>
+      <tr><td><code>product</code></td><td>✓</td><td>✓</td><td>✓</td><td><code>{ slug, name, productCode? }</code> — no internal id.</td></tr>
+      <tr><td><code>quantity</code></td><td>✓</td><td>✓</td><td>✓</td><td></td></tr>
+      <tr><td><code>unitPrice</code></td><td>✓</td><td>✓</td><td>✓</td><td>USD string, 2 decimals.</td></tr>
+      <tr><td><code>totalCharged</code></td><td>✓</td><td>✓</td><td>✓</td><td></td></tr>
+      <tr><td><code>currency</code></td><td>✓</td><td>✓</td><td>✓</td><td>Always <code>USD</code>.</td></tr>
+      <tr><td><code>balanceAfter</code></td><td>✓</td><td>—</td><td>—</td><td>Only on first successful POST.</td></tr>
+      <tr><td><code>createdAt</code></td><td>—</td><td>✓</td><td>✓</td><td>ISO 8601 UTC.</td></tr>
+      <tr><td><code>delivery</code></td><td>✓</td><td>✓</td><td>✓</td><td>Omitted if empty; <code>instructions</code> omitted when null.</td></tr>
+      <tr><td><code>lines</code></td><td>bulk only</td><td>bulk only</td><td>—</td><td>Array of per-item delivery objects.</td></tr>
+    </table>
+
+    <p class="warning"><b>Not returned:</b> internal <code>product.id</code>, <code>source</code>, <code>completedAt</code>, null <code>lines</code>, or redundant <code>primaryOrderCode</code> when equal to <code>orderCode</code>.</p>
+
+    <h3>Idempotency</h3>
+    <pre>Attempt 1 → POST with externalOrderId "shop-1001" → creates order, charges $12.50, returns balanceAfter
+Attempt 2 → same POST (network retry)     → returns same order + delivery, NO second charge, NO balanceAfter</pre>
+  </section>
+
+  <!-- 12. QUERIES -->
+  <section id="queries">
+    <h2>12. Orders &amp; Usage Queries</h2>
+
+    <h3>GET /orders</h3>
+    <p>Query params: <code>page</code>, <code>limit</code> (max 100), <code>status</code>, <code>externalOrderId</code>, <code>productSlug</code>.</p>
+    <pre>{
+  "data": [
+    {
+      "orderCode": "SO-20260617-A1B2C3",
+      "externalOrderId": "shop-order-1001",
+      "status": "COMPLETED",
+      "deliveryType": "LINK",
+      "product": { "slug": "gemini-pro-monthly", "name": "Gemini Pro — 30 days" },
+      "quantity": 1,
+      "unitPrice": "12.50",
+      "totalCharged": "12.50",
+      "currency": "USD",
+      "createdAt": "2026-06-17T08:30:00.000Z"
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
+}</pre>
+    <p class="warning"><b>Important:</b> This lists API orders only — not bot menu purchases.</p>
+
+    <h3>GET /orders/:orderCode</h3>
+    <pre>GET https://ggsoma.store/api/partner/v1/orders/SO-20260617-A1B2C3
+Authorization: Bearer sk_live_...</pre>
+    <pre>{
+  "ok": true,
+  "orderCode": "SO-20260617-A1B2C3",
+  "externalOrderId": "shop-order-1001",
+  "status": "COMPLETED",
+  "deliveryType": "LINK",
+  "product": { "slug": "gemini-pro-monthly", "name": "Gemini Pro — 30 days" },
+  "quantity": 1,
+  "unitPrice": "12.50",
+  "totalCharged": "12.50",
+  "currency": "USD",
+  "createdAt": "2026-06-17T08:30:00.000Z",
+  "delivery": {
+    "link": "https://example.com/activate/xyz123",
+    "instructions": "Open the link and sign in."
+  }
+}</pre>
+
+    <h3>GET /usage</h3>
+    <pre>{
+  "balance": "113.00",
+  "currency": "USD",
+  "apiOrdersTotal": 47,
+  "apiSpendTotal": "582.30",
+  "apiOrders24h": 5,
+  "apiSpend24h": "62.50",
+  "requestCountToday": 128,
+  "errorCountToday": 3
+}</pre>
+
+    <h3>Quick lookup table</h3>
+    <table>
+      <tr><th>Need</th><th>Endpoint</th></tr>
+      <tr><td>All API orders</td><td><code>GET /orders</code></td></tr>
+      <tr><td>Find by shop order id</td><td><code>GET /orders?externalOrderId=...</code></td></tr>
+      <tr><td>Delivery content</td><td><code>GET /orders/:orderCode</code></td></tr>
+      <tr><td>Balance only</td><td><code>GET /balance</code></td></tr>
+      <tr><td>Full stats</td><td><code>GET /usage</code></td></tr>
+    </table>
+  </section>
+
+  <!-- 13. SCENARIOS -->
+  <section id="scenarios">
+    <h2>13. Practical Scenarios</h2>
+
+    <h3>Scenario 1 — Simple shop</h3>
+    <pre>1. GET /catalog/products           → display products
+2. GET /catalog/products/:slug     → product page (optional)
+3. Customer pays on your site
+4. POST /orders                    → deliver link/code/content to customer</pre>
+
+    <h3>Scenario 2 — Idempotent retry after timeout</h3>
+    <p>If your HTTP client times out, retry with the <b>same</b> <code>externalOrderId</code>. The API returns the original order without charging twice.</p>
+
+    <h3>Scenario 3 — Bulk with tier pricing</h3>
+    <pre>1. Read bulkDiscount.tiers from catalog
+2. POST /orders { quantity: 10, externalOrderId: "bulk-001" }
+3. Receive lines[] with 10 separate delivery items</pre>
+
+    <h3>Scenario 4 — Pre-check before purchase</h3>
+    <pre>1. GET /balance
+2. GET /catalog/products/:slug  → check stock.count and yourPrice
+3. Ensure quantity × unitPrice ≤ balance
+4. POST /orders</pre>
+
+    <h3>Scenario 5 — Recover old order</h3>
+    <pre>GET /orders?externalOrderId=shop-order-1001
+GET /orders/SO-20260617-A1B2C3</pre>
+
+    <h3>Scenario 6 — Out of stock</h3>
+    <pre>{ "ok": false, "error": { "code": "OUT_OF_STOCK", "message": "Product is out of stock.", "requestId": "req_..." } }</pre>
+
+    <h3>Scenario 7 — Account suspended</h3>
+    <pre>{ "ok": false, "error": { "code": "PARTNER_SUSPENDED", "message": "API access is suspended.", "requestId": "req_..." } }</pre>
+    <p>HTTP 403 — contact support via the Telegram bot.</p>
+  </section>
+
+  <!-- 14. ERRORS -->
+  <section id="errors" class="danger">
+    <h2>14. Error Reference</h2>
+    <table>
+      <tr><th>Code</th><th>HTTP</th><th>When</th></tr>
+      <tr><td><code>INVALID_API_KEY</code></td><td>401</td><td>Missing, wrong, or revoked key.</td></tr>
+      <tr><td><code>API_KEY_EXPIRED</code></td><td>401</td><td>Key past expiry date.</td></tr>
+      <tr><td><code>USER_BLOCKED</code></td><td>403</td><td>Account blocked.</td></tr>
+      <tr><td><code>API_ACCESS_DISABLED</code></td><td>403</td><td>API disabled for account.</td></tr>
+      <tr><td><code>PARTNER_SUSPENDED</code></td><td>403</td><td>Temporary API suspension.</td></tr>
+      <tr><td><code>MAINTENANCE</code></td><td>503</td><td>System maintenance.</td></tr>
+      <tr><td><code>RATE_LIMIT_EXCEEDED</code></td><td>429</td><td>Too many requests.</td></tr>
+      <tr><td><code>PRODUCT_NOT_FOUND</code></td><td>404</td><td>Unknown product reference.</td></tr>
+      <tr><td><code>PRODUCT_NOT_ALLOWED</code></td><td>400</td><td>Product hidden or blocked for you.</td></tr>
+      <tr><td><code>PRODUCT_UNAVAILABLE</code></td><td>400</td><td>Product or provider inactive.</td></tr>
+      <tr><td><code>UNSUPPORTED_DELIVERY_TYPE</code></td><td>400</td><td>Not LINK/COUPON/READY_ACCOUNT.</td></tr>
+      <tr><td><code>OUT_OF_STOCK</code></td><td>400</td><td>No inventory available.</td></tr>
+      <tr><td><code>INVALID_QUANTITY</code></td><td>400</td><td>Quantity &lt; 1 or above max.</td></tr>
+      <tr><td><code>INSUFFICIENT_BALANCE</code></td><td>400</td><td>Balance too low (includes required/balance).</td></tr>
+      <tr><td><code>ORDER_NOT_FOUND</code></td><td>404</td><td>Unknown order or not owned via API.</td></tr>
+      <tr><td><code>VALIDATION_ERROR</code></td><td>400</td><td>Invalid request body.</td></tr>
+      <tr><td><code>FAILED</code></td><td>400/500</td><td>Generic order failure.</td></tr>
+    </table>
+
+    <h3>Insufficient balance example</h3>
+    <pre>{
+  "ok": false,
+  "error": {
+    "code": "INSUFFICIENT_BALANCE",
+    "message": "Required 12.50 USD, available 3.20 USD.",
+    "requestId": "req_f1e2d3c4b5a67890",
+    "required": 12.5,
+    "balance": 3.2
+  }
+}</pre>
+  </section>
+
+  <!-- 15. BEST PRACTICES -->
+  <section id="best-practices" class="success">
+    <h2>15. Best Practices</h2>
+    <div class="grid">
+      <div class="card"><b>Security</b><br/>Server-side keys only. HTTPS always. Regenerate compromised keys. Never log READY_ACCOUNT delivery.</div>
+      <div class="card"><b>Reliability</b><br/>Stable <code>externalOrderId</code> per shop order. Retry POST on timeout with same id.</div>
+      <div class="card"><b>Pricing</b><br/>Show <code>yourPrice</code> to customers, not internal catalog/provider costs.</div>
+      <div class="card"><b>Performance</b><br/>Cache catalog 60–120s. Exponential backoff on 429. Poll <code>GET /orders/:code</code> only if needed.</div>
+      <div class="card"><b>Key rotation</b><br/>Create separate keys for production vs staging. Regenerate from bot when rotating.</div>
+      <div class="card"><b>Support</b><br/>Include <code>requestId</code> from error responses when contacting support.</div>
+    </div>
+  </section>
+
+  <!-- 16. CHECKLIST -->
+  <section id="checklist">
+    <h2>16. Integration Checklist</h2>
+    <ul>
+      <li>☐ Create named API key in Telegram bot (private chat).</li>
+      <li>☐ Store key in server env var — not in frontend.</li>
+      <li>☐ Implement <code>GET /health</code> check before orders.</li>
+      <li>☐ Cache catalog; refresh periodically.</li>
+      <li>☐ Map products by <code>slug</code> in your database.</li>
+      <li>☐ Send unique <code>externalOrderId</code> per shop order.</li>
+      <li>☐ Handle idempotent retry (same externalOrderId).</li>
+      <li>☐ Branch on <code>error.code</code> — especially <code>INSUFFICIENT_BALANCE</code>, <code>OUT_OF_STOCK</code>.</li>
+      <li>☐ Deliver <code>delivery.*</code> to customer securely.</li>
+      <li>☐ Log <code>requestId</code> on failures.</li>
+      <li>☐ Test bulk orders if you sell quantity &gt; 1.</li>
+      <li>☐ Plan key rotation via bot Regenerate.</li>
+    </ul>
+  </section>
+
+  <!-- 17. FAQ -->
+  <section id="faq">
+    <h2>17. FAQ</h2>
+
+    <h4>Why does GET /catalog not show the same products as the Telegram bot menu?</h4>
+    <p>The bot menu uses layout rules and <code>showInBot</code> flags. Partner API exposes only instant inventory products with delivery types LINK, COUPON, or READY_ACCOUNT.</p>
+
+    <h4>Can I retrieve my API key via HTTP?</h4>
+    <p>No. View and copy keys in the Telegram bot under <b>My keys</b>. Use Regenerate if you lost a key.</p>
+
+    <h4>How many keys can I have?</h4>
+    <p>Up to 3 active keys by default. Each should have a descriptive name (Production, Staging, etc.).</p>
+
+    <h4>What happens if I retry POST /orders with the same externalOrderId?</h4>
+    <p>You get the original order response. No second charge. <code>balanceAfter</code> is omitted on retry.</p>
+
+    <h4>Does GET /orders show bot purchases?</h4>
+    <p>No — API orders only. Use the bot for full order history.</p>
+
+    <h4>What currency and balance are used?</h4>
+    <p>USD. Same balance as your Telegram bot wallet.</p>
+  </section>
+
+  <!-- 18. CURL -->
+  <section id="curl">
+    <h2>18. Full cURL Appendix</h2>
+    <pre>API="https://ggsoma.store/api/partner/v1"
+KEY="sk_live_YOUR_SECRET_KEY"
+AUTH="Authorization: Bearer $KEY"
+
+# Health
+curl -s "$API/health" | jq
+
+# Balance
+curl -s "$API/balance" -H "$AUTH" | jq
+
+# Providers
+curl -s "$API/catalog/providers" -H "$AUTH" | jq
+
+# Products
+curl -s "$API/catalog/products?provider=gemini" -H "$AUTH" | jq
+
+# Product detail
+curl -s "$API/catalog/products/gemini-pro-monthly" -H "$AUTH" | jq
+
+# Place order
+curl -s -X POST "$API/orders" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"productSlug":"gemini-pro-monthly","quantity":1,"externalOrderId":"demo-001"}' | jq
+
+# Idempotent retry (same externalOrderId — safe)
+curl -s -X POST "$API/orders" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"productSlug":"gemini-pro-monthly","quantity":1,"externalOrderId":"demo-001"}' | jq
+
+# List orders
+curl -s "$API/orders?page=1&amp;limit=10" -H "$AUTH" | jq
+
+# Filter by your shop order id
+curl -s "$API/orders?externalOrderId=demo-001" -H "$AUTH" | jq
+
+# Order detail + delivery
+curl -s "$API/orders/SO-20260617-A1B2C3" -H "$AUTH" | jq
+
+# Usage stats
+curl -s "$API/usage" -H "$AUTH" | jq</pre>
+    <p class="muted">Last updated: June 2026 · Partner API v1 · Base URL: https://ggsoma.store/api/partner/v1</p>
+  </section>
+
+</body>
+</html>

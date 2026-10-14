@@ -1,0 +1,28 @@
+.period-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 22px;
+}
+.period-control label {
+  font-size: 12px;
+  align-items: center;
+}
+.period-control select {
+  width: 120px;
+  padding: 8px;
+}
+.list-filter {
+  max-width: 230px;
+  font-size: 12px;
+}
+@media (max-width: 560px) {
+  .period-control {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .list-filter {
+    max-width: 100%;
+  }
+}

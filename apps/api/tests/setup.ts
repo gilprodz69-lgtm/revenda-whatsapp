@@ -1,0 +1,11 @@
+process.env.NODE_ENV = 'test';
+process.env.DATABASE_URL ??= 'postgresql://app:test@127.0.0.1:5432/revenda_test';
+process.env.REDIS_URL ??= 'redis://127.0.0.1:6379/15';
+process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+process.env.WEBHOOK_SECRET = 'b'.repeat(64);
+process.env.EVOLUTION_API_KEY = 'c'.repeat(64);
+process.env.PARTNER_API_KEY = 'sk_live_TEST_DO_NOT_USE';
+process.env.PARTNER_URL = 'http://partner.test/api/partner/v1';
+process.env.EVOLUTION_URL = 'http://evolution.test';
+process.env.APP_ORIGIN = 'http://localhost:5173';
+process.env.PUBLIC_API_URL = 'http://localhost:3000';
