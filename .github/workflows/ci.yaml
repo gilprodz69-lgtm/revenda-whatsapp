@@ -36,5 +36,6 @@ jobs:
       - run: for script in scripts/*.sh infra/*.sh; do bash -n "$script"; done
       - run: bash scripts/test-installer.sh
       - run: node scripts/vps-command.cjs | bash -n
-      - run: docker build -f apps/api/Dockerfile -t revenda-api:ci .
-      - run: docker build -f apps/admin/Dockerfile -t revenda-admin:ci .
+      - run: docker build -f apps/api/Dockerfile -t revenda-api:1.0.0 .
+      - run: docker build -f apps/admin/Dockerfile -t revenda-admin:1.0.0 .
+      - run: bash scripts/compose-smoke.sh

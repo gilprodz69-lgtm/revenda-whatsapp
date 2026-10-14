@@ -27,7 +27,7 @@ x-app: &app
   security_opt: [no-new-privileges:true]
   cap_drop: [ALL]
   read_only: true
-  tmpfs: [/tmp:size=64m, mode=1777]
+  tmpfs: ['/tmp:size=64m,mode=1777']
   mem_limit: 768m
   cpus: 1.0
   logging: { driver: json-file, options: { max-size: 10m, max-file: '3' } }
@@ -182,7 +182,7 @@ services:
     networks: [private]
     restart: unless-stopped
     read_only: true
-    tmpfs: [/tmp:size=16m, mode=1777]
+    tmpfs: ['/tmp:size=16m,mode=1777']
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     mem_limit: 128m
