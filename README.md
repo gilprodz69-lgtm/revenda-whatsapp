@@ -9,10 +9,10 @@ O contrato do fornecedor está em [docs/references/partner-api-docs.html](docs/r
 Ubuntu Server **24.04 LTS x86_64**, 2 vCPUs, 4 GB de RAM e 15 GB livres. O repositório é **público**, e a instalação não pede login ou token GitHub. Na sessão SSH da VPS, copie e execute **um único comando**:
 
 ```bash
-bash -o pipefail -c 'curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | sudo --preserve-env=SSH_CONNECTION bash'
+bash -o pipefail -ec 'privilege=(); if (( EUID != 0 )); then privilege=(sudo --preserve-env=SSH_CONNECTION); fi; if ! command -v curl >/dev/null; then "${privilege[@]}" apt-get update -qq; "${privilege[@]}" apt-get install -y -qq curl ca-certificates; fi; curl -fsSL --retry 3 --connect-timeout 15 https://raw.githubusercontent.com/gilprodz69-lgtm/revenda-whatsapp/v1.0.0/scripts/bootstrap.sh | "${privilege[@]}" bash'
 ```
 
-O comando requer `curl` e `sudo`, normalmente disponíveis na imagem Ubuntu do provedor. A versão inicial é fixada na tag `v1.0.0`, e os arquivos ficam em `/opt/revenda-whatsapp`.
+O comando funciona como root ou com um usuário que tenha sudo e instala curl se necessário. A versão inicial é fixada na tag `v1.0.0`, e os arquivos ficam em `/opt/revenda-whatsapp`.
 
 O instalador solicita domínio, e-mail para HTTPS, e-mail do administrador e senha inicial com confirmação. Também pede as chaves Partner/Expay sem exibi-las; Enter permite configurar depois. A chave Expay ativa o Pix no primeiro provisionamento. Mostra o IPv4 público e o registro DNS **A** a criar; você pode fazer o apontamento enquanto a instalação continua. Instala Docker pelo repositório oficial, constrói os serviços, aplica migrations, preserva a porta SSH no UFW e configura backup criptografado diário. HTTPS é emitido automaticamente quando o DNS e as portas 80/443 estiverem acessíveis. Execuções repetidas preservam `.env`, bancos, volumes e contas existentes.
 

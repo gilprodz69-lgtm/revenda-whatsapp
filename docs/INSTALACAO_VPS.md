@@ -6,7 +6,7 @@
 - Domínio ou subdomínio que você pode editar no provedor DNS, por exemplo `loja.seudominio.com`.
 - Acesso SSH com `sudo` ou como `root`. Execute em terminal interativo.
 - Libere TCP 80/443 no firewall do provedor, além da sua porta SSH.
-- `curl` e `sudo`, normalmente já disponíveis na imagem Ubuntu do provedor.
+- O comando instala curl se necessário e usa sudo somente quando executado por um usuário que não seja root.
 - O repositório [gilprodz69-lgtm/revenda-whatsapp](https://github.com/gilprodz69-lgtm/revenda-whatsapp) é **público**. Não é necessário usuário, senha ou token GitHub para instalar ou atualizar.
 
 ## Um comando

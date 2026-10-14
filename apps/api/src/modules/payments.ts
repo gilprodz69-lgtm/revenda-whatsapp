@@ -93,7 +93,9 @@ function validateCharge(
 export async function reconcilePayment(gatewayId: string) {
   const gateway = await pixGateway(),
     charge = await gateway.get(gatewayId);
-  const payment = await db.payment.findUnique({ where: { id: charge.reference } });
+  // Bind the response to the ID we actually requested, then validate its local reference.
+  // Unknown IDs are recovered through the original idempotent creation, never by reference alone.
+  const payment = await db.payment.findUnique({ where: { gatewayId } });
   if (!payment || payment.gateway !== gateway.name) return;
   validateCharge(payment, charge);
   await transaction(async (tx) => {
