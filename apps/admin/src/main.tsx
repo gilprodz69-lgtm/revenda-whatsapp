@@ -29,6 +29,9 @@ import {
 import { api, HttpError, type Row } from './api';
 import './style.css';
 import './filters.css';
+import './theme.css';
+import './glow';
+import { EditorDialog, ProductFields } from './editor';
 const brl = (v: unknown) => `R$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const usd = (v: unknown) => `US$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const date = (v: unknown) => (v ? new Date(String(v)).toLocaleString('pt-BR') : '—');
@@ -168,7 +171,7 @@ function App() {
     [booting, setBooting] = useState(true),
     [page, setPage] = useState('dashboard'),
     [sidebar, setSidebar] = useState(false),
-    [dark, setDark] = useState(localStorage.getItem('theme') === 'dark'),
+    [dark, setDark] = useState(localStorage.getItem('theme') !== 'light'),
     [data, setData] = useState<any>(null),
     [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
@@ -254,6 +257,7 @@ function App() {
     }
   }
   function open(type: string, row?: Row) {
+    setToast(null);
     setDetail(null);
     setMessages([]);
     setQr(null);
@@ -394,6 +398,9 @@ function App() {
         />
       ) : (
         <div className="shell">
+          <a className="skip-link" href="#main">
+            Ir para o conteúdo
+          </a>
           {sidebar && <div className="scrim" onClick={() => setSidebar(false)} />}
           <aside className={sidebar ? 'sidebar visible' : 'sidebar'}>
             <a className="brand" onClick={() => go('dashboard')}>
@@ -405,7 +412,21 @@ function App() {
                 <small>CENTRAL DE OPERAÇÕES</small>
               </div>
             </a>
-            <span className="nav-label">PRINCIPAL</span>
+            <div className="sidebar-account">
+              <div className="avatar">{String(admin.email).slice(0, 1).toUpperCase()}</div>
+              <div>
+                <strong>{String(admin.email).split('@')[0]}</strong>
+                <small>
+                  {admin.role === 'OWNER'
+                    ? 'Administrador'
+                    : admin.role === 'OPERATOR'
+                      ? 'Operador'
+                      : 'Somente leitura'}
+                </small>
+              </div>
+              <ChevronRight size={14} />
+            </div>
+            <span className="nav-label">ADMINISTRAÇÃO</span>
             <nav>
               {navigation
                 .filter((n) => canConfigure || !['settings', 'logs', 'admins'].includes(n.id))
@@ -413,6 +434,7 @@ function App() {
                   <button
                     key={n.id}
                     className={page === n.id ? 'active' : ''}
+                    aria-current={page === n.id ? 'page' : undefined}
                     onClick={() => go(n.id)}
                   >
                     <n.icon size={19} />
@@ -472,7 +494,7 @@ function App() {
                 <span className="admin-email">{admin.email}</span>
               </div>
             </header>
-            <main className="content">
+            <main className="content" key={page} id="main">
               <div className="page-heading">
                 <div>
                   <span className="eyebrow">SUA OPERAÇÃO, EM UM SÓ LUGAR</span>
@@ -1021,6 +1043,7 @@ function App() {
                                 'store.name': f.get('store'),
                                 'human.hours': f.get('hours'),
                                 'messages.welcome': f.get('welcome'),
+                                'bot.messageStyle': f.get('messageStyle'),
                                 'bot.activationKeywords': String(f.get('activationKeywords') ?? '')
                                   .split(/[,\n]/)
                                   .map((v) => v.trim())
@@ -1057,6 +1080,20 @@ function App() {
                               ]
                             ).join(', ')}
                           />
+                          <Field name="messageStyle" label="Formato do atendimento no WhatsApp">
+                            <select
+                              name="messageStyle"
+                              defaultValue={data.values['bot.messageStyle'] ?? 'interactive'}
+                            >
+                              <option value="interactive">Botões e listas</option>
+                              <option value="text">Menu em texto</option>
+                            </select>
+                          </Field>
+                          <small>
+                            Botões para ações rápidas e listas para categorias e produtos. A
+                            exibição depende da Evolution e do WhatsApp; se a API rejeitar o
+                            formato, o atendimento continua em texto.
+                          </small>
                           <small className="muted">
                             Separe palavras ou frases por vírgula. O bot inicia somente no privado
                             quando a mensagem corresponde a uma delas, ignorando maiúsculas e
@@ -1388,398 +1425,334 @@ function App() {
             </main>
           </div>
           {modal && (
-            <div className="modal-overlay" onClick={() => setModal(null)}>
-              <section
-                className="modal"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Detalhes e edição"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="modal-header">
-                  <h2>
-                    {
-                      (
-                        {
-                          product: 'Regras de venda',
-                          customer: 'Cliente',
-                          order: 'Detalhes do pedido',
-                          balance: 'Ajuste de carteira',
-                          instance: 'Nova instância',
-                          connect: 'Conectar WhatsApp',
-                          resend: 'Reenviar entrega',
-                          refund: 'Estornar pedido',
-                          rate: 'Cotação manual',
-                          admin: 'Novo administrador',
-                          editAdmin: 'Gerenciar administrador',
-                        } as Record<string, string>
-                      )[modal.type]
-                    }
-                  </h2>
-                  <button className="icon-btn" onClick={() => setModal(null)} aria-label="Fechar">
-                    <X size={20} />
-                  </button>
-                </div>
-                {['customer', 'order'].includes(modal.type) ? (
-                  !detail ? (
-                    <div className="loading-panel">
-                      <LoaderCircle className="spin" /> Carregando…
+            <EditorDialog
+              key={modal.type + (modal.row?.id ?? modal.row?.slug ?? modal.row?.name ?? '')}
+              title={
+                (
+                  {
+                    product: 'Regras de venda',
+                    customer: 'Cliente',
+                    order: 'Detalhes do pedido',
+                    balance: 'Ajuste de carteira',
+                    instance: 'Nova instância',
+                    connect: 'Conectar WhatsApp',
+                    resend: 'Reenviar entrega',
+                    refund: 'Estornar pedido',
+                    rate: 'Cotação manual',
+                    admin: 'Novo administrador',
+                    editAdmin: 'Gerenciar administrador',
+                  } as Record<string, string>
+                )[modal.type] ?? 'Detalhes'
+              }
+              description={
+                modal.type === 'product'
+                  ? 'Personalize preços, ofertas e disponibilidade do produto.'
+                  : modal.type === 'connect'
+                    ? 'Conecte o número da sua loja ao atendimento.'
+                    : 'Consulte os detalhes e gerencie sua operação.'
+              }
+              icon={
+                modal.type === 'product'
+                  ? Package
+                  : ['customer', 'admin', 'editAdmin'].includes(modal.type)
+                    ? Users
+                    : ['instance', 'connect'].includes(modal.type)
+                      ? MessageCircle
+                      : ['balance', 'rate', 'refund'].includes(modal.type)
+                        ? Wallet
+                        : ShoppingBag
+              }
+              wide={modal.type === 'product'}
+              onClose={() => setModal(null)}
+              busy={busy}
+              error={toast?.error ? toast.message : undefined}
+            >
+              {['customer', 'order'].includes(modal.type) ? (
+                !detail ? (
+                  <div className="loading-panel">
+                    <LoaderCircle className="spin" /> Carregando…
+                  </div>
+                ) : modal.type === 'customer' ? (
+                  <div className="stack">
+                    <div className="detail-title">
+                      <h3>{detail.name}</h3>
+                      <p>+{detail.phone}</p>
                     </div>
-                  ) : modal.type === 'customer' ? (
-                    <div className="stack">
-                      <div className="detail-title">
-                        <h3>{detail.name}</h3>
-                        <p>+{detail.phone}</p>
+                    <div className="mini-metrics">
+                      <div>
+                        <small>Disponível</small>
+                        <b>{brl(detail.wallet?.available)}</b>
                       </div>
-                      <div className="mini-metrics">
-                        <div>
-                          <small>Disponível</small>
-                          <b>{brl(detail.wallet?.available)}</b>
-                        </div>
-                        <div>
-                          <small>Reservado</small>
-                          <b>{brl(detail.wallet?.reserved)}</b>
-                        </div>
+                      <div>
+                        <small>Reservado</small>
+                        <b>{brl(detail.wallet?.reserved)}</b>
                       </div>
-                      <div className="instance-actions">
-                        {canConfigure && (
-                          <button className="secondary" onClick={() => open('balance', detail)}>
-                            Ajustar saldo
-                          </button>
-                        )}
-                        {canOperate && (
-                          <>
-                            <button
-                              className="secondary"
-                              onClick={() =>
-                                void act(`/customers/${detail.id}`, 'PATCH', {
-                                  blocked: !detail.blocked,
-                                })
-                                  .then(() => setModal(null))
-                                  .catch(() => {})
-                              }
-                            >
-                              {detail.blocked ? 'Desbloquear' : 'Bloquear'}
-                            </button>
-                            <button
-                              className="secondary"
-                              onClick={() =>
-                                void act(`/customers/${detail.id}`, 'PATCH', { humanUntil: null })
-                                  .then(() => setModal(null))
-                                  .catch(() => {})
-                              }
-                            >
-                              Liberar automação
-                            </button>
-                            <button
-                              className="secondary"
-                              onClick={() =>
-                                void api<Row[]>(`/messages/${detail.id}`)
-                                  .then(setMessages)
-                                  .catch(report)
-                              }
-                            >
-                              Histórico de mensagens
-                            </button>
-                          </>
-                        )}
-                      </div>
-                      <h3>Movimentações financeiras</h3>
-                      <div className="compact-list">
-                        {detail.wallet?.entries.map((r: Row) => (
-                          <div key={r.id}>
-                            <span>
-                              {r.kind}
-                              <small>
-                                {r.reason} · {date(r.createdAt)}
-                              </small>
-                            </span>
-                            <b>{brl(r.availableDelta)}</b>
-                          </div>
-                        ))}
-                      </div>
-                      <h3>Pedidos</h3>
-                      <div className="compact-list">
-                        {detail.orders.map((r: Row) => (
-                          <button
-                            className="service-row"
-                            key={r.id}
-                            onClick={() => open('order', r)}
-                          >
-                            #{r.id.slice(0, 8)} <Badge value={r.status} />
-                          </button>
-                        ))}
-                      </div>
-                      {messages.length > 0 && (
-                        <>
-                          <h3>Mensagens</h3>
-                          <div className="message-history">
-                            {messages.map((r) => (
-                              <div key={r.id} className={r.direction === 'OUT' ? 'out' : 'in'}>
-                                <small>
-                                  {date(r.createdAt)} · {statusLabels[r.status]}
-                                </small>
-                                <p>{r.text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </>
+                    </div>
+                    <div className="instance-actions">
+                      {canConfigure && (
+                        <button className="secondary" onClick={() => open('balance', detail)}>
+                          Ajustar saldo
+                        </button>
                       )}
                       {canOperate && (
-                        <form
-                          className="stack"
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            const f = new FormData(e.currentTarget);
-                            try {
-                              await act(
-                                `/messages/${detail.id}`,
-                                'POST',
-                                { instanceName: f.get('instanceName'), text: f.get('text') },
-                                'Mensagem enfileirada.',
-                              );
-                              setModal(null);
-                            } catch {}
-                          }}
-                        >
-                          <h3>Responder como atendente</h3>
-                          <Field name="instanceName" label="Instância WhatsApp" required />
-                          <Field name="text" label="Mensagem">
-                            <textarea name="text" rows={3} required />
-                          </Field>
-                          <button className="primary" disabled={busy}>
-                            Enviar ao cliente
+                        <>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              void act(`/customers/${detail.id}`, 'PATCH', {
+                                blocked: !detail.blocked,
+                              })
+                                .then(() => setModal(null))
+                                .catch(() => {})
+                            }
+                          >
+                            {detail.blocked ? 'Desbloquear' : 'Bloquear'}
                           </button>
-                        </form>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              void act(`/customers/${detail.id}`, 'PATCH', { humanUntil: null })
+                                .then(() => setModal(null))
+                                .catch(() => {})
+                            }
+                          >
+                            Liberar automação
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              void api<Row[]>(`/messages/${detail.id}`)
+                                .then(setMessages)
+                                .catch(report)
+                            }
+                          >
+                            Histórico de mensagens
+                          </button>
+                        </>
                       )}
                     </div>
-                  ) : (
-                    <div className="stack">
-                      <div className="detail-title">
-                        <h3>#{detail.id.slice(0, 8)}</h3>
-                        <Badge value={detail.status} />
-                        <p>
-                          {detail.customer.name} · +{detail.customer.phone}
-                        </p>
+                    <h3>Movimentações financeiras</h3>
+                    <div className="compact-list">
+                      {detail.wallet?.entries.map((r: Row) => (
+                        <div key={r.id}>
+                          <span>
+                            {r.kind}
+                            <small>
+                              {r.reason} · {date(r.createdAt)}
+                            </small>
+                          </span>
+                          <b>{brl(r.availableDelta)}</b>
+                        </div>
+                      ))}
+                    </div>
+                    <h3>Pedidos</h3>
+                    <div className="compact-list">
+                      {detail.orders.map((r: Row) => (
+                        <button className="service-row" key={r.id} onClick={() => open('order', r)}>
+                          #{r.id.slice(0, 8)} <Badge value={r.status} />
+                        </button>
+                      ))}
+                    </div>
+                    {messages.length > 0 && (
+                      <>
+                        <h3>Mensagens</h3>
+                        <div className="message-history">
+                          {messages.map((r) => (
+                            <div key={r.id} className={r.direction === 'OUT' ? 'out' : 'in'}>
+                              <small>
+                                {date(r.createdAt)} · {statusLabels[r.status]}
+                              </small>
+                              <p>{r.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {canOperate && (
+                      <form
+                        className="stack"
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          const f = new FormData(e.currentTarget);
+                          try {
+                            await act(
+                              `/messages/${detail.id}`,
+                              'POST',
+                              { instanceName: f.get('instanceName'), text: f.get('text') },
+                              'Mensagem enfileirada.',
+                            );
+                            setModal(null);
+                          } catch {}
+                        }}
+                      >
+                        <h3>Responder como atendente</h3>
+                        <Field name="instanceName" label="Instância WhatsApp" required />
+                        <Field name="text" label="Mensagem">
+                          <textarea name="text" rows={3} required />
+                        </Field>
+                        <button className="primary" disabled={busy}>
+                          Enviar ao cliente
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                ) : (
+                  <div className="stack">
+                    <div className="detail-title">
+                      <h3>#{detail.id.slice(0, 8)}</h3>
+                      <Badge value={detail.status} />
+                      <p>
+                        {detail.customer.name} · +{detail.customer.phone}
+                      </p>
+                    </div>
+                    <dl className="detail-grid">
+                      <div>
+                        <dt>Total</dt>
+                        <dd>{brl(detail.totalBrl)}</dd>
                       </div>
-                      <dl className="detail-grid">
-                        <div>
-                          <dt>Total</dt>
-                          <dd>{brl(detail.totalBrl)}</dd>
-                        </div>
-                        <div>
-                          <dt>Custo realizado</dt>
-                          <dd>{detail.actualCostUsd ? usd(detail.actualCostUsd) : 'Pendente'}</dd>
-                        </div>
-                        <div>
-                          <dt>Cotação utilizada</dt>
-                          <dd>R$ {detail.usdBrl}</dd>
-                        </div>
-                        <div>
-                          <dt>Lucro bruto</dt>
-                          <dd>{detail.grossProfitBrl ? brl(detail.grossProfitBrl) : 'Pendente'}</dd>
-                        </div>
-                        <div>
-                          <dt>Pedido externo</dt>
-                          <dd>{detail.externalOrderCode ?? 'Aguardando'}</dd>
-                        </div>
-                        <div>
-                          <dt>Erro</dt>
-                          <dd>{detail.errorCode ?? 'Nenhum'}</dd>
-                        </div>
-                      </dl>
-                      <div className="instance-actions">
-                        {canOperate && !detail.reservationSettled && (
-                          <>
-                            <button
-                              className="secondary"
-                              onClick={() =>
-                                void act(`/orders/${detail.id}/reconcile`)
-                                  .then(() => setModal(null))
-                                  .catch(() => {})
-                              }
-                            >
-                              Reconciliar
-                            </button>
-                            <button
-                              className="secondary"
-                              onClick={() =>
-                                void act(`/orders/${detail.id}/review`)
-                                  .then(() => setModal(null))
-                                  .catch(() => {})
-                              }
-                            >
-                              Revisão manual
-                            </button>
-                          </>
-                        )}
-                        {canConfigure && detail.status === 'COMPLETED' && (
-                          <button className="secondary" onClick={() => open('refund', detail)}>
-                            Estornar carteira
+                      <div>
+                        <dt>Custo realizado</dt>
+                        <dd>{detail.actualCostUsd ? usd(detail.actualCostUsd) : 'Pendente'}</dd>
+                      </div>
+                      <div>
+                        <dt>Cotação utilizada</dt>
+                        <dd>R$ {detail.usdBrl}</dd>
+                      </div>
+                      <div>
+                        <dt>Lucro bruto</dt>
+                        <dd>{detail.grossProfitBrl ? brl(detail.grossProfitBrl) : 'Pendente'}</dd>
+                      </div>
+                      <div>
+                        <dt>Pedido externo</dt>
+                        <dd>{detail.externalOrderCode ?? 'Aguardando'}</dd>
+                      </div>
+                      <div>
+                        <dt>Erro</dt>
+                        <dd>{detail.errorCode ?? 'Nenhum'}</dd>
+                      </div>
+                    </dl>
+                    <div className="instance-actions">
+                      {canOperate && !detail.reservationSettled && (
+                        <>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              void act(`/orders/${detail.id}/reconcile`)
+                                .then(() => setModal(null))
+                                .catch(() => {})
+                            }
+                          >
+                            Reconciliar
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              void act(`/orders/${detail.id}/review`)
+                                .then(() => setModal(null))
+                                .catch(() => {})
+                            }
+                          >
+                            Revisão manual
+                          </button>
+                        </>
+                      )}
+                      {canConfigure && detail.status === 'COMPLETED' && (
+                        <button className="secondary" onClick={() => open('refund', detail)}>
+                          Estornar carteira
+                        </button>
+                      )}
+                    </div>
+                    <h3>Entregas</h3>
+                    <p className="muted">
+                      O conteúdo protegido é enviado somente ao número comprador.
+                    </p>
+                    {detail.deliveries.map((r: Row) => (
+                      <div className="service-row" key={r.id}>
+                        <span>
+                          {r.type}
+                          <small>{r.lineCode}</small>
+                        </span>
+                        <Badge value={r.status} />
+                        {canOperate && detail.status === 'COMPLETED' && (
+                          <button className="text-btn" onClick={() => open('resend', r)}>
+                            Reenviar
                           </button>
                         )}
                       </div>
-                      <h3>Entregas</h3>
-                      <p className="muted">
-                        O conteúdo protegido é enviado somente ao número comprador.
-                      </p>
-                      {detail.deliveries.map((r: Row) => (
-                        <div className="service-row" key={r.id}>
+                    ))}
+                    <h3>Tentativas de processamento</h3>
+                    <div className="compact-list">
+                      {detail.attempts.map((r: Row) => (
+                        <div key={r.id}>
                           <span>
-                            {r.type}
-                            <small>{r.lineCode}</small>
+                            {r.operation} · {r.outcome}
+                            <small>
+                              {r.errorCode} {r.requestId}
+                            </small>
                           </span>
-                          <Badge value={r.status} />
-                          {canOperate && detail.status === 'COMPLETED' && (
-                            <button className="text-btn" onClick={() => open('resend', r)}>
-                              Reenviar
-                            </button>
-                          )}
+                          <small>{date(r.createdAt)}</small>
                         </div>
                       ))}
-                      <h3>Tentativas de processamento</h3>
-                      <div className="compact-list">
-                        {detail.attempts.map((r: Row) => (
-                          <div key={r.id}>
-                            <span>
-                              {r.operation} · {r.outcome}
-                              <small>
-                                {r.errorCode} {r.requestId}
-                              </small>
-                            </span>
-                            <small>{date(r.createdAt)}</small>
-                          </div>
-                        ))}
-                      </div>
                     </div>
-                  )
-                ) : modal.type === 'connect' ? (
-                  <div className="stack">
-                    <p>Escaneie o QR Code em WhatsApp → Dispositivos conectados.</p>
-                    {qr?.base64 && (
-                      <img
-                        className="qr-image"
-                        src={String(qr.base64)}
-                        alt="QR Code para conectar WhatsApp"
-                      />
-                    )}
-                    {qr?.pairingCode && (
-                      <div className="pairing-code">{String(qr.pairingCode)}</div>
-                    )}
-                    <form
-                      className="stack"
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        const f = new FormData(e.currentTarget);
-                        setBusy(true);
-                        try {
-                          setQr(
-                            await api(
-                              `/whatsapp/${modal.row?.name}/connect`,
-                              'POST',
-                              f.get('number') ? { number: String(f.get('number')) } : {},
-                            ),
-                          );
-                        } catch (err) {
-                          report(err);
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                    >
-                      <Field name="number" label="Número com DDI (opcional para pareamento)" />
-                      <button className="primary" disabled={busy}>
-                        {busy ? 'Consultando…' : 'Gerar QR Code / pareamento'}
-                      </button>
-                    </form>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        void api(`/whatsapp/${modal.row?.name}/state`)
-                          .then((r) => {
-                            notify(statusLabels[r.state] ?? r.state);
-                            void load();
-                          })
-                          .catch(report)
-                      }
-                    >
-                      Verificar conexão
-                    </button>
                   </div>
-                ) : (
-                  <form className="stack" onSubmit={submit}>
-                    {modal.type === 'product' && (
-                      <>
-                        <p>{modal.row?.name}</p>
-                        <div className="form-grid">
-                          <Field
-                            name="markupPercent"
-                            label="Margem sobre custo (%)"
-                            defaultValue={modal.row?.markupPercent}
-                            required
-                          />
-                          <Field
-                            name="fixedMargin"
-                            label="Margem fixa por unidade (R$)"
-                            defaultValue={modal.row?.fixedMargin}
-                            required
-                          />
-                          <Field
-                            name="manualPrice"
-                            label="Preço manual (R$)"
-                            defaultValue={modal.row?.manualPrice}
-                          />
-                          <Field
-                            name="roundingStep"
-                            label="Passo de arredondamento (R$)"
-                            defaultValue={modal.row?.roundingStep}
-                            required
-                          />
-                          <Field
-                            name="promoPrice"
-                            label="Preço promocional (R$)"
-                            defaultValue={modal.row?.promoPrice}
-                          />
-                          <Field
-                            name="promoUntil"
-                            type="datetime-local"
-                            label="Promoção até"
-                            defaultValue={
-                              modal.row?.promoUntil
-                                ? new Date(
-                                    new Date(modal.row.promoUntil).getTime() -
-                                      new Date().getTimezoneOffset() * 60000,
-                                  )
-                                    .toISOString()
-                                    .slice(0, 16)
-                                : ''
-                            }
-                          />
-                          <Field
-                            name="volumeDiscountPercent"
-                            label="Desconto por volume (%)"
-                            defaultValue={modal.row?.volumeDiscountPercent}
-                          />
-                          <Field
-                            name="volumeMinQuantity"
-                            type="number"
-                            label="Quantidade mínima para desconto"
-                            defaultValue={modal.row?.volumeMinQuantity}
-                          />
-                        </div>
-                        <Toggle name="active" label="Produto ativo" checked={modal.row?.active} />
-                        <Toggle
-                          name="visible"
-                          label="Visível no WhatsApp"
-                          checked={modal.row?.visible}
-                        />
-                        <Toggle
-                          name="authorizedResale"
-                          label="Confirmo a procedência e a autorização de revenda"
-                          checked={modal.row?.authorizedResale}
-                        />
-                      </>
-                    )}
+                )
+              ) : modal.type === 'connect' ? (
+                <div className="stack">
+                  <p>Escaneie o QR Code em WhatsApp → Dispositivos conectados.</p>
+                  {qr?.base64 && (
+                    <img
+                      className="qr-image"
+                      src={String(qr.base64)}
+                      alt="QR Code para conectar WhatsApp"
+                    />
+                  )}
+                  {qr?.pairingCode && <div className="pairing-code">{String(qr.pairingCode)}</div>}
+                  <form
+                    className="stack"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const f = new FormData(e.currentTarget);
+                      setBusy(true);
+                      try {
+                        setQr(
+                          await api(
+                            `/whatsapp/${modal.row?.name}/connect`,
+                            'POST',
+                            f.get('number') ? { number: String(f.get('number')) } : {},
+                          ),
+                        );
+                      } catch (err) {
+                        report(err);
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    <Field name="number" label="Número com DDI (opcional para pareamento)" />
+                    <button className="primary" disabled={busy}>
+                      {busy ? 'Consultando…' : 'Gerar QR Code / pareamento'}
+                    </button>
+                  </form>
+                  <button
+                    className="secondary"
+                    onClick={() =>
+                      void api(`/whatsapp/${modal.row?.name}/state`)
+                        .then((r) => {
+                          notify(statusLabels[r.state] ?? r.state);
+                          void load();
+                        })
+                        .catch(report)
+                    }
+                  >
+                    Verificar conexão
+                  </button>
+                </div>
+              ) : (
+                <form className="modal-form" onSubmit={submit}>
+                  <div
+                    className={modal.type === 'product' ? 'product-body' : 'editor-scroll stack'}
+                  >
+                    {modal.type === 'product' && <ProductFields row={modal.row!} />}
                     {modal.type === 'balance' && (
                       <>
                         <p>
@@ -1861,18 +1834,26 @@ function App() {
                         )}
                       </>
                     )}
-                    <div className="modal-actions">
-                      <button className="secondary" type="button" onClick={() => setModal(null)}>
-                        Cancelar
-                      </button>
-                      <button className="primary" disabled={busy}>
-                        {busy ? 'Salvando…' : 'Salvar'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </section>
-            </div>
+                  </div>
+                  <div className="modal-actions">
+                    <small>
+                      <span className="required-mark">*</span> Campos obrigatórios
+                    </small>
+                    <button
+                      className="secondary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setModal(null)}
+                    >
+                      Cancelar
+                    </button>
+                    <button className="primary" disabled={busy}>
+                      {busy ? 'Salvando…' : 'Salvar'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </EditorDialog>
           )}
         </div>
       )}

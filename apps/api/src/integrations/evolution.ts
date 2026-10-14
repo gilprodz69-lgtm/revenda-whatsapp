@@ -1,8 +1,14 @@
 import { env } from '../config.js';
 import { AppError } from '../core/errors.js';
 import { z } from 'zod';
+import { type Interactive, nativeFlowId } from '../modules/interactive.js';
+export class InteractiveRejected extends AppError {
+  constructor() {
+    super('INTERACTIVE_REJECTED', 'A Evolution não aceitou este formato interativo.', 503);
+  }
+}
 export class EvolutionService {
-  async call(path: string, method = 'GET', body?: unknown) {
+  async call(path: string, method = 'GET', body?: unknown, interactive = false) {
     try {
       const response = await fetch(`${env.EVOLUTION_URL}${path}`, {
         method,
@@ -11,6 +17,10 @@ export class EvolutionService {
         signal: AbortSignal.timeout(15000),
         redirect: 'error',
       });
+      // Only a definitive validation/unsupported response permits a different send.
+      // Timeouts, 5xx and missing send IDs remain uncertain and must not be repeated.
+      if (interactive && [400, 404, 405, 422].includes(response.status))
+        throw new InteractiveRejected();
       if (!response.ok)
         throw new AppError(
           'EVOLUTION_ERROR',
@@ -74,6 +84,44 @@ export class EvolutionService {
       linkPreview: false,
     });
   }
+  sendInteractive(instance: string, phone: string, message: Interactive) {
+    const common = { number: phone, title: message.title, description: message.description };
+    return message.type === 'buttons'
+      ? this.call(
+          `/message/sendButtons/${encodeURIComponent(instance)}`,
+          'POST',
+          {
+            ...common,
+            footer: message.footer,
+            buttons: message.buttons.map((button) => ({
+              type: 'reply',
+              displayText: button.title,
+              id: button.id,
+            })),
+          },
+          true,
+        )
+      : this.call(
+          `/message/sendList/${encodeURIComponent(instance)}`,
+          'POST',
+          {
+            ...common,
+            footerText: message.footer,
+            buttonText: message.buttonText,
+            sections: [
+              {
+                title: 'Opções disponíveis',
+                rows: message.rows.map((row) => ({
+                  title: row.title,
+                  rowId: row.id,
+                  ...(row.description ? { description: row.description } : {}),
+                })),
+              },
+            ],
+          },
+          true,
+        );
+  }
   sendMedia(
     instance: string,
     phone: string,
@@ -111,6 +159,12 @@ export const incomingSchema = z.object({
       conversation: z.string().optional(),
       extendedTextMessage: z.object({ text: z.string() }).optional(),
       buttonsResponseMessage: z.object({ selectedButtonId: z.string() }).optional(),
+      templateButtonReplyMessage: z.object({ selectedId: z.string() }).optional(),
+      interactiveResponseMessage: z
+        .object({
+          nativeFlowResponseMessage: z.object({ paramsJson: z.string().max(2048) }).optional(),
+        })
+        .optional(),
       listResponseMessage: z
         .object({ singleSelectReply: z.object({ selectedRowId: z.string() }) })
         .optional(),
@@ -118,6 +172,21 @@ export const incomingSchema = z.object({
     .optional(),
   messageType: z.string().optional(),
 });
+export function incomingText(message: z.infer<typeof incomingSchema>): string {
+  return (
+    message.message?.buttonsResponseMessage?.selectedButtonId ??
+    message.message?.templateButtonReplyMessage?.selectedId ??
+    message.message?.listResponseMessage?.singleSelectReply?.selectedRowId ??
+    (message.message?.interactiveResponseMessage
+      ? nativeFlowId(
+          message.message.interactiveResponseMessage.nativeFlowResponseMessage?.paramsJson,
+        )
+      : undefined) ??
+    message.message?.conversation ??
+    message.message?.extendedTextMessage?.text ??
+    ''
+  );
+}
 export function normalizePhone(jid: string): string | null {
   if (!jid.endsWith('@s.whatsapp.net')) return null;
   const phone = jid.split('@')[0]!;

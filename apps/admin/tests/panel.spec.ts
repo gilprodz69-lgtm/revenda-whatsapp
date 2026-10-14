@@ -24,8 +24,10 @@ async function mockApi(page: Page, loggedIn = true) {
     if (url.pathname === '/api/auth/me') {
       body = loggedIn ? { admin, csrf: 'test' } : { message: 'Faça login.' };
       status = loggedIn ? 200 : 401;
-    } else if (url.pathname === '/api/auth/login') body = { admin, csrf: 'test' };
-    else if (url.pathname === '/api/dashboard') body = dashboard;
+    } else if (url.pathname === '/api/auth/login') {
+      loggedIn = true;
+      body = { admin, csrf: 'test' };
+    } else if (url.pathname === '/api/dashboard') body = dashboard;
     else if (url.pathname === '/api/products' && req.method() === 'GET')
       body = {
         data: [
@@ -79,11 +81,22 @@ test('login, dashboard, tema e navegação responsiva', async ({ page }) => {
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('heading', { name: 'Visão geral', exact: true })).toBeVisible();
   await expect(page.getByText('As primeiras vendas começam aqui')).toBeVisible();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await page.getByRole('button', { name: 'Alternar tema' }).click();
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+  await page.reload();
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+  await page.screenshot({
+    path: `test-results/dashboard-light-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
   await page.getByRole('button', { name: 'Alternar tema' }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
   await page.screenshot({
     path: `test-results/dashboard-${test.info().project.name}.png`,
     fullPage: true,
+    animations: 'disabled',
   });
   await navigate(page, 'Pedidos');
   await expect(page.getByText('Nenhum registro encontrado')).toBeVisible();
@@ -95,15 +108,54 @@ test('edita regras de produto com valores financeiros em strings', async ({ page
   await expect(page.getByText('Assinatura autorizada')).toBeVisible();
   await page.getByRole('button', { name: 'Editar' }).click();
   await page.getByLabel('Preço manual (R$)').fill('39.90');
+  await page.getByRole('tab', { name: 'Promoções', exact: true }).click();
+  await page.getByLabel('Preço promocional (R$)').fill('35.00');
+  await page.getByRole('tab', { name: 'Disponibilidade', exact: true }).click();
+  await page.getByLabel('Visível no WhatsApp', { exact: true }).uncheck();
+  await page.getByRole('tab', { name: 'Preços', exact: true }).click();
+  await expect(page.getByLabel('Preço manual (R$)')).toHaveValue('39.90');
+  await page.screenshot({
+    path: `test-results/product-editor-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
   const mutation = page.waitForRequest(
     (req) => req.method() === 'PATCH' && req.url().includes('/products/authorized-product'),
   );
   await page.getByRole('button', { name: 'Salvar', exact: true }).click();
   expect((await mutation).postDataJSON()).toMatchObject({
     manualPrice: '39.90',
+    promoPrice: '35.00',
+    visible: false,
     authorizedResale: true,
   });
   await expect(page.getByRole('dialog')).not.toBeVisible();
+});
+
+test('modal contém o foco, permite navegar nas abas por teclado e fecha com Escape', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  const edit = page.getByRole('button', { name: 'Editar', exact: true });
+  await edit.click();
+  const dialog = page.getByRole('dialog', { name: 'Regras de venda' });
+  await expect(dialog).toBeVisible();
+  await page.getByRole('tab', { name: 'Preços', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Promoções', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(page.getByLabel('Preço promocional (R$)')).toBeVisible();
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press('Tab');
+    expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(edit).toBeFocused();
 });
 test('não mostra segredos persistidos e permite editar template', async ({ page }) => {
   await mockApi(page);
@@ -135,9 +187,26 @@ test('salva palavras de ativação no admin e mantém após recarregar', async (
     'quero comprar',
     'vendas',
   ]);
+  expect((await mutation).postDataJSON()['bot.messageStyle']).toBe('interactive');
   await page.reload();
   await navigate(page, 'Configurações');
   await expect(field).toHaveValue('comprar, quero comprar, vendas');
+});
+
+test('abre a seção que contém um campo obrigatório inválido antes de salvar', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await page.getByLabel('Margem sobre custo (%)').fill('');
+  await page.getByRole('tab', { name: 'Promoções', exact: true }).click();
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Preços', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(page.getByLabel('Margem sobre custo (%)')).toBeFocused();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 test('configura Expay e mantém a chave fora dos valores retornados', async ({ page }) => {
   await mockApi(page);

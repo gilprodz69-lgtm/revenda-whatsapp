@@ -251,6 +251,7 @@ model Message {
   customer Customer @relation(fields: [customerId], references: [id])
   direction String
   encryptedText String
+  encryptedInteractive String?
   encryptedMedia String?
   mediaType String?
   fileName String?

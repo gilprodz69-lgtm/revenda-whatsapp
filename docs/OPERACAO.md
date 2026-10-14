@@ -17,7 +17,7 @@ Se um webhook esgotar as retentativas, ele aparece em Logs → Eventos em revis�
 
 ### WhatsApp desconectado ou QR ausente
 
-Use Consultar conexão para obter estado atual; depois Conectar ou Reconectar. QR expira: gere novamente quando necessário. Pareamento depende da Evolution/Baileys/WhatsApp no momento da conexão. Sem número privado resolvido, eventos `@lid` são ignorados para evitar enviar credenciais ao identificador errado. Se a Evolution fornecer `remoteJidAlt` com número real, ele é usado como fallback. Grupos, status/broadcasts e `fromMe` são ignorados. O menu é numérico para compatibilidade.
+Use Consultar conexão para obter estado atual; depois Conectar ou Reconectar. QR expira: gere novamente quando necessário. Pareamento depende da Evolution/Baileys/WhatsApp no momento da conexão. Sem número privado resolvido, eventos `@lid` são ignorados para evitar enviar credenciais ao identificador errado. Se a Evolution fornecer `remoteJidAlt` com número real, ele é usado como fallback. Grupos, status/broadcasts e `fromMe` são ignorados.
 
 Mensagens pendentes ficam na outbox durante desconexão. Envios com resultado desconhecido não são repetidos automaticamente. Abra o histórico/WhatsApp conectado e use reenvio auditado da entrega após verificar o destinatário e a situação.
 
@@ -26,6 +26,16 @@ Mensagens pendentes ficam na outbox durante desconexão. Envios com resultado de
 Em **Configurações → Palavras-chave para iniciar o bot**, cadastre palavras ou frases separadas por vírgula e clique em **Salvar atendimento**. O texto inteiro deve corresponder a uma entrada; diferenças de caixa, acentos, espaços repetidos e pontuação final `.!?` são ignoradas. Por exemplo, `comprar, quero comprar, vendas`. Deixar vazio impede novos atendimentos automáticos. Sessões já abertas continuam aceitando números e comandos do menu; expiram após 30 minutos sem interação. Saudações adicionais da versão anterior são preservadas até salvar a nova lista.
 
 O bot atende apenas conversas privadas: grupos são ignorados tanto no webhook quanto no worker, inclusive quando existe um telefone privado alternativo no evento. Isso também se aplica a eventos antigos ainda pendentes.
+
+Em **Configurações → Formato do atendimento no WhatsApp**, escolha **Botões e listas** (padrão) ou **Menu em texto**. O menu principal oferece Comprar serviços, Meu saldo e Suporte. Pelo saldo, o cliente acessa Adicionar saldo, Meus pedidos e Minha conta. Categorias e produtos usam listas paginadas de até dez opções; quantidade e confirmação usam botões. Valores diferentes, e-mail e CPF continuam aceitando texto. Os menus numéricos permanecem disponíveis como alternativa.
+
+As seleções interativas têm identificadores vinculados à etapa atual; cliques de menus anteriores ou sessões expiradas são ignorados. A mensagem interativa é armazenada cifrada junto da resposta na outbox. Timeout, erro 5xx ou ausência do ID de envio deixam resultado desconhecido sem repetir automaticamente. Rejeições HTTP 400/404/405/422 permitem enviar a alternativa em texto.
+
+O contrato segue [DTOs da Evolution 2.3.7](https://github.com/evolution-foundation/evolution-api/blob/2.3.7/src/api/dto/sendMessage.dto.ts) e seus endpoints `sendButtons`/`sendList`. Existem [relatos de falhas de botões/listas nessa versão](https://github.com/evolution-foundation/evolution-api/issues/2390). A aceitação HTTP não comprova que o WhatsApp exibiu o componente no aparelho. Confira usando outro número; se necessário, selecione Menu em texto. Esta atualização mantém a imagem estável da Evolution; não troca automaticamente para uma versão candidata com requisitos novos de ativação.
+
+### Aparência do painel
+
+O admin segue o sistema de consulta: fonte Montserrat local, tema preto/violeta, alternativa clara, navegação e botões arredondados, cartões com brilho no cursor e animações de entrada. A preferência de tema é mantida no navegador; o padrão para novos acessos é escuro. A edição de produtos usa modal com seções de Preços, Promoções e Disponibilidade. Escape fecha o modal quando não há gravação em andamento; foco e rolagem ficam contidos nele. As animações respeitam a preferência de movimento reduzido do dispositivo.
 
 Após persistir uma mensagem, a aplicação avisa imediatamente as filas de processamento e envio. A varredura de recuperação a cada 15 segundos permanece para falhas temporárias; não é mais necessária no caminho normal. O limite de 20 envios por minuto continua ativo. Filas cheias, desconexões, Evolution e chamadas externas ainda podem aumentar a latência.
 

@@ -44,6 +44,6 @@ jobs:
       - run: bash scripts/test-installer.sh
       - run: python3 scripts/test-update.py
       - run: node scripts/vps-command.cjs | bash -n
-      - run: docker build -f apps/api/Dockerfile -t revenda-api:1.0.1 .
-      - run: docker build -f apps/admin/Dockerfile -t revenda-admin:1.0.1 .
+      - run: docker build -f apps/api/Dockerfile -t revenda-api:1.0.2 .
+      - run: docker build -f apps/admin/Dockerfile -t revenda-admin:1.0.2 .
       - run: bash scripts/compose-smoke.sh

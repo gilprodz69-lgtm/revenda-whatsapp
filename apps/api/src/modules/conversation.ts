@@ -5,12 +5,19 @@ import { encrypt, decrypt } from '../core/crypto.js';
 import { AppError } from '../core/errors.js';
 import { setting } from '../core/settings.js';
 import { withLock } from '../core/lock.js';
-import { incomingSchema, privateSenderPhone } from '../integrations/evolution.js';
+import { incomingSchema, incomingText, privateSenderPhone } from '../integrations/evolution.js';
 import { notifyOutgoing, notifyOrder } from '../core/dispatch.js';
 import { activationKeywords, matchesActivation } from './bot-activation.js';
 import { quoteProduct, placeOrder } from './orders.js';
 import { createDeposit } from './payments.js';
 import { templates, messageTemplate } from './templates.js';
+import {
+  interactionStateSchema,
+  resolveChoice,
+  compactMenu,
+  interactiveSchema,
+  type Interactive,
+} from './interactive.js';
 export { validateTemplate, renderTemplate, allowedPlaceholders } from './templates.js';
 
 export const menuText = templates.welcome!.text;
@@ -33,6 +40,8 @@ export const stateSchema = z.object({
     'DEPOSIT_CPF',
   ]),
   provider: z.string().optional(),
+  providerOffset: z.number().optional(),
+  interaction: interactionStateSchema.optional(),
   options: z.array(z.string()).optional(),
   slug: z.string().optional(),
   quantity: z.number().optional(),
@@ -74,12 +83,7 @@ export async function processIncoming(eventId: string) {
       await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
       return;
     }
-    const raw =
-      message.message?.conversation ??
-      message.message?.extendedTextMessage?.text ??
-      message.message?.buttonsResponseMessage?.selectedButtonId ??
-      message.message?.listResponseMessage?.singleSelectReply?.selectedRowId ??
-      '';
+    let raw = incomingText(message);
     const existingCustomer = await db.customer.findUnique({ where: { phone } });
     const current = existingCustomer
       ? await db.conversation.findUnique({
@@ -92,6 +96,18 @@ export async function processIncoming(eventId: string) {
         })
       : null;
     const active = !!current && current.expiresAt > new Date();
+    if (raw.startsWith('wa:')) {
+      const selected = resolveChoice(
+        raw,
+        active ? (current.state as Record<string, unknown>).interaction : null,
+      );
+      // Old menus never become quantities or confirmations in a different conversation step.
+      if (selected === null) {
+        await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
+        return;
+      }
+      raw = selected;
+    }
     const trigger = matchesActivation(raw, await activationKeywords());
     if (
       !active &&
@@ -119,15 +135,58 @@ export async function processIncoming(eventId: string) {
     let qr: string | undefined;
     let humanUntil: Date | undefined;
     let createdOrderId: string | undefined;
+    let interactive: Interactive | undefined;
+    const rich = (await setting('bot.messageStyle', 'interactive')) === 'interactive';
+    const choices = (
+      type: 'buttons' | 'list',
+      text: string,
+      items: { value: string; title: string; description?: string }[],
+      buttonText = 'Ver opções',
+    ) => {
+      if (!rich || !items.length) return;
+      const token = crypto.randomUUID();
+      state.interaction = { token, values: items.map((item) => item.value) };
+      const mapped = items.map((item) => ({
+        id: `wa:${token}:${item.value}`,
+        title: item.title.slice(0, 24),
+        ...(item.description ? { description: item.description.slice(0, 72) } : {}),
+      }));
+      interactive = interactiveSchema.parse(
+        type === 'buttons'
+          ? {
+              type,
+              title: store.slice(0, 200),
+              description: compactMenu(text),
+              footer: 'Selecione uma opção abaixo',
+              buttons: mapped,
+            }
+          : {
+              type,
+              title: store.slice(0, 200),
+              description: compactMenu(text),
+              footer: 'Selecione uma opção abaixo',
+              buttonText,
+              rows: mapped,
+            },
+      );
+    };
     const input = normalizedInput(raw),
       store = await setting('store.name', 'Nossa loja');
-    const mainMenu = async () => messageTemplate('welcome', { nome: customer.name, loja: store });
+    const mainMenu = async () => {
+      const text = await messageTemplate('welcome', { nome: customer.name, loja: store });
+      choices('buttons', text, [
+        { value: '1', title: '🛍️ Comprar serviços' },
+        { value: '2', title: '💰 Meu saldo' },
+        { value: '5', title: '🎧 Suporte' },
+      ]);
+      return text;
+    };
     const startHuman = async () => {
       humanUntil = new Date(Date.now() + 24 * 3600000);
       state = { step: 'MENU' };
       return `${await messageTemplate('human')}\n${await setting('human.hours', 'Atendimento conforme disponibilidade da equipe.')}`;
     };
-    const showProviders = async () => {
+    const showProviders = async (offset = 0) => {
       const providers = await db.provider.findMany({
         where: {
           products: {
@@ -141,12 +200,33 @@ export async function processIncoming(eventId: string) {
           },
         },
         orderBy: { sortOrder: 'asc' },
+        skip: offset,
+        take: 9,
       });
-      state = { step: 'PROVIDERS', options: providers.map((p) => p.key) };
+      state = {
+        step: 'PROVIDERS',
+        options: providers.slice(0, 8).map((p) => p.key),
+        providerOffset: offset,
+      };
       if (!providers.length) state = { step: 'MENU' };
-      return providers.length
-        ? `${await messageTemplate('categories')}\n${providers.map((p, i) => `${i + 1} - ${p.name}`).join('\n')}\n\n0 - Menu`
-        : messageTemplate('unavailable');
+      const text = providers.length
+        ? `${await messageTemplate('categories')}\n${providers
+            .slice(0, 8)
+            .map((p, i) => `${i + 1} - ${p.name}`)
+            .join('\n')}\n${providers.length > 8 ? '9 - Mais categorias\n' : ''}\n0 - Menu`
+        : await messageTemplate('unavailable');
+      if (providers.length)
+        choices(
+          'list',
+          await messageTemplate('categories'),
+          [
+            ...providers.slice(0, 8).map((p, i) => ({ value: String(i + 1), title: p.name })),
+            ...(providers.length > 8 ? [{ value: '9', title: 'Mais categorias' }] : []),
+            { value: '0', title: 'Menu principal' },
+          ],
+          'Ver categorias',
+        );
+      return text;
     };
     const showProducts = async (provider: string, offset = 0) => {
       const products = await db.product.findMany({
@@ -168,12 +248,31 @@ export async function processIncoming(eventId: string) {
         options: products.slice(0, 8).map((p) => p.slug),
         offset,
       };
-      return `${await messageTemplate('products')}\n${products
+      const text = `${await messageTemplate('products')}\n${products
         .slice(0, 8)
         .map((p, i) => `${i + 1} - ${p.name}`)
         .join(
           '\n',
         )}\n${products.length > 8 ? '9 - Mais produtos\n' : ''}\nVoltar - Categorias\n0 - Menu`;
+      choices(
+        'list',
+        await messageTemplate('products'),
+        [
+          ...products
+            .slice(0, 8)
+            .map((p, i) => ({
+              value: String(i + 1),
+              title: p.name,
+              description: `Estoque: ${p.stock} · Máximo: ${p.maxQuantity}`,
+            })),
+          ...(products.length > 8
+            ? [{ value: '9', title: 'Mais produtos' }]
+            : [{ value: '0', title: 'Menu principal' }]),
+          { value: 'voltar', title: 'Voltar às categorias' },
+        ],
+        'Ver produtos',
+      );
+      return text;
     };
     try {
       if (
@@ -206,10 +305,20 @@ export async function processIncoming(eventId: string) {
             include: { entries: { orderBy: { createdAt: 'desc' }, take: 5 } },
           });
           response = `Saldo disponível: R$ ${wallet.available.toFixed(2)}\nSaldo reservado: R$ ${wallet.reserved.toFixed(2)}\n\nÚltimas movimentações:\n${wallet.entries.map((e) => `${e.kind}: R$ ${e.availableDelta.toFixed(2)}`).join('\n')}\n\n3 - Adicionar saldo\n0 - Menu`;
+          choices('buttons', response, [
+            { value: '3', title: '💳 Adicionar saldo' },
+            { value: '4', title: '📦 Meus pedidos' },
+            { value: '6', title: '👤 Minha conta' },
+          ]);
         } else if (['3', 'pix', 'deposito', 'adicionar saldo'].includes(input)) {
           state = { step: 'DEPOSIT_AMOUNT' };
           response =
             'Quanto deseja adicionar à carteira? Informe o valor em reais (ex.: 50,00). O pagamento confirmado vira saldo; depois você confirma sua compra.\n0 - Cancelar';
+          choices('buttons', response, [
+            { value: '20', title: 'R$ 20,00' },
+            { value: '50', title: 'R$ 50,00' },
+            { value: '100', title: 'R$ 100,00' },
+          ]);
         } else if (['4', 'pedidos', 'meus pedidos'].includes(input)) {
           const orders = await db.order.findMany({
             where: { customerId: customer.id },
@@ -228,10 +337,13 @@ export async function processIncoming(eventId: string) {
           response = `Nome: ${customer.name}\nWhatsApp: +${customer.phone}\nConta: ${customer.id.slice(0, 8)}\n\n0 - Menu`;
         else response = await mainMenu();
       } else if (state.step === 'PROVIDERS') {
-        const provider = state.options?.[Number(input) - 1];
-        response = provider
-          ? await showProducts(provider)
-          : 'Escolha uma categoria da lista ou digite 0.';
+        if (input === '9') response = await showProviders((state.providerOffset ?? 0) + 8);
+        else {
+          const provider = state.options?.[Number(input) - 1];
+          response = provider
+            ? await showProducts(provider)
+            : 'Escolha uma categoria da lista ou digite 0.';
+        }
       } else if (state.step === 'PRODUCTS') {
         if (input === '9' && state.provider)
           response = await showProducts(state.provider, (state.offset ?? 0) + 8);
@@ -242,6 +354,13 @@ export async function processIncoming(eventId: string) {
             const quote = await quoteProduct(slug, 1);
             state = { step: 'QUANTITY', slug, provider: state.provider };
             response = `${quote.live.name}\n${(quote.live.description ?? '').replace(/<[^>]*>/g, '')}\nPreço unitário: R$ ${quote.unitSaleBrl}\nDuração: ${quote.live.durationDays ?? 'Não informada'} dias\nGarantia: ${quote.live.warranty?.enabled ? (quote.live.warranty.days ?? 'Consultar suporte') : 0} dias\nMáximo: ${quote.live.stock.maxQuantity}\n\n${await messageTemplate('quantity')}\nVoltar - Produtos\n0 - Cancelar`;
+            choices(
+              'buttons',
+              response,
+              [1, 2, 3]
+                .filter((n) => n <= quote.live.stock.maxQuantity)
+                .map((n) => ({ value: String(n), title: n === 1 ? '1 unidade' : `${n} unidades` })),
+            );
           }
         }
       } else if (state.step === 'QUANTITY' && state.slug) {
@@ -255,6 +374,10 @@ export async function processIncoming(eventId: string) {
           quoteExpires: Date.now() + 5 * 60000,
         };
         response = `${await messageTemplate('summary', { produto: quote.live.name, valor: quote.totalBrl })}\nQuantidade: ${quantity}\n\n1 - Confirmar usando saldo da carteira\n0 - Cancelar\nO preço será conferido novamente ao confirmar.`;
+        choices('buttons', response, [
+          { value: '1', title: '✅ Confirmar compra' },
+          { value: '0', title: 'Cancelar' },
+        ]);
       } else if (state.step === 'CONFIRM' && state.slug && state.quantity && state.total) {
         if (!['1', 'sim', 'confirmar'].includes(input))
           response = 'Digite 1 para confirmar ou 0 para cancelar.';
@@ -315,11 +438,28 @@ export async function processIncoming(eventId: string) {
         }
       }
     } catch (e) {
+      interactive = undefined;
       if (e instanceof AppError) response = e.message + '\nDigite menu para voltar ao início.';
       else throw e;
       if (e instanceof AppError && ['PRICE_CHANGED', 'OUT_OF_STOCK'].includes(e.code))
         state = { step: 'MENU' };
     }
+    if (
+      response &&
+      rich &&
+      !interactive &&
+      !customer.blocked &&
+      instance.botEnabled &&
+      !(customer.humanUntil && customer.humanUntil > new Date()) &&
+      !humanUntil &&
+      state.step === 'MENU'
+    )
+      choices('buttons', response, [
+        { value: '0', title: 'Menu principal' },
+        { value: '3', title: 'Adicionar saldo' },
+        { value: '5', title: 'Suporte' },
+      ]);
+    if (!interactive) delete state.interaction;
     await transaction(async (tx) => {
       if ((await tx.webhookEvent.findUniqueOrThrow({ where: { id: eventId } })).processedAt) return;
       if (humanUntil)
@@ -361,6 +501,7 @@ export async function processIncoming(eventId: string) {
             instanceName: instance.name,
             direction: 'OUT',
             encryptedText: encrypt(response),
+            ...(interactive ? { encryptedInteractive: encrypt(JSON.stringify(interactive)) } : {}),
           },
           update: {},
         });

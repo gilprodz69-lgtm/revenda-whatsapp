@@ -8,9 +8,10 @@ import { prepareDeliveries, dispatchMessage } from '../../src/modules/messaging.
 import { processIncoming } from '../../src/modules/conversation.js';
 import { syncCatalog } from '../../src/modules/catalog.js';
 import { partner } from '../../src/integrations/partner.js';
-import { evolution } from '../../src/integrations/evolution.js';
-import { PartnerError } from '../../src/core/errors.js';
-import { encrypt } from '../../src/core/crypto.js';
+import { evolution, InteractiveRejected } from '../../src/integrations/evolution.js';
+import { PartnerError, AppError } from '../../src/core/errors.js';
+import { encrypt, decrypt } from '../../src/core/crypto.js';
+import type { Interactive } from '../../src/modules/interactive.js';
 import { saveSetting } from '../../src/core/settings.js';
 import { buildApp } from '../../src/app.js';
 import {
@@ -296,6 +297,173 @@ describe('Ledger transacional, pedidos e recuperação', () => {
   });
 });
 describe('Catálogo, webhooks e fluxo completo', () => {
+  it('navega por botões e listas, ignora menu antigo e confirma a compra uma vez', async () => {
+    await credit();
+    async function receive(text: string, native = false) {
+      const event = await db.webhookEvent.create({
+        data: {
+          key: randomUUID(),
+          source: 'evolution',
+          encryptedPayload: encrypt(
+            JSON.stringify({
+              instance: 'store',
+              data: {
+                key: { id: randomUUID(), remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+                message: native
+                  ? {
+                      interactiveResponseMessage: {
+                        nativeFlowResponseMessage: { paramsJson: JSON.stringify({ id: text }) },
+                      },
+                    }
+                  : { conversation: text },
+              },
+            }),
+          ),
+        },
+      });
+      await processIncoming(event.id);
+      await processIncoming(event.id);
+      return db.message.findUnique({ where: { key: `reply-${event.key}` } });
+    }
+    const menu = JSON.parse(decrypt((await receive('oi'))!.encryptedInteractive!)) as Interactive;
+    expect(menu.type).toBe('buttons');
+    const options = (m: Interactive) => (m.type === 'buttons' ? m.buttons : m.rows);
+    expect(options(menu).map((o) => o.title)).toEqual([
+      '🛍️ Comprar serviços',
+      '💰 Meu saldo',
+      '🎧 Suporte',
+    ]);
+    expect(menu.description).not.toContain('1 - Ver produtos');
+    const categories = JSON.parse(
+      decrypt((await receive(options(menu)[0]!.id, true))!.encryptedInteractive!),
+    ) as Interactive;
+    expect(categories.type).toBe('list');
+    const products = JSON.parse(
+      decrypt((await receive(options(categories)[0]!.id, true))!.encryptedInteractive!),
+    ) as Interactive;
+    expect(products.type).toBe('list');
+    const quantity = JSON.parse(
+      decrypt((await receive(options(products)[0]!.id, true))!.encryptedInteractive!),
+    ) as Interactive;
+    const summary = JSON.parse(
+      decrypt((await receive(options(quantity)[0]!.id, true))!.encryptedInteractive!),
+    ) as Interactive;
+    expect(options(summary)[0]!.title).toBe('✅ Confirmar compra');
+    expect(await receive(options(quantity)[0]!.id, true)).toBeNull();
+    expect(await db.order.count()).toBe(0);
+    await receive(options(summary)[0]!.id, true);
+    await receive(options(summary)[0]!.id, true);
+    expect(await db.order.count()).toBe(1);
+    expect((await db.wallet.findUniqueOrThrow({ where: { customerId } })).reserved.toFixed(2)).toBe(
+      '10.00',
+    );
+  });
+  it('volta ao texto só após rejeição explícita; timeout não duplica o envio', async () => {
+    const message = {
+      type: 'buttons',
+      title: 'Loja',
+      description: 'Olá',
+      footer: 'Escolha',
+      buttons: [{ id: 'wa:token:1', title: 'Comprar' }],
+    };
+    const create = () =>
+      db.message.create({
+        data: {
+          key: randomUUID(),
+          instanceName: 'store',
+          customerId,
+          direction: 'OUT',
+          encryptedText: encrypt('1 - Comprar'),
+          encryptedInteractive: encrypt(JSON.stringify(message)),
+        },
+      });
+    const rich = vi
+      .spyOn(evolution, 'sendInteractive')
+      .mockRejectedValueOnce(new InteractiveRejected());
+    const text = vi.spyOn(evolution, 'sendText').mockResolvedValue({ key: { id: 'fallback' } });
+    const first = await create();
+    await dispatchMessage(first.id);
+    expect(text).toHaveBeenCalledTimes(1);
+    expect((await db.message.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('SENT');
+    rich.mockRejectedValueOnce(new AppError('EVOLUTION_TIMEOUT', 'Timeout', 503));
+    const second = await create();
+    await expect(dispatchMessage(second.id)).rejects.toMatchObject({ code: 'EVOLUTION_TIMEOUT' });
+    expect(text).toHaveBeenCalledTimes(1);
+    expect((await db.message.findUniqueOrThrow({ where: { id: second.id } })).status).toBe(
+      'UNKNOWN',
+    );
+    await dispatchMessage(second.id);
+    expect(rich).toHaveBeenCalledTimes(2);
+    await saveSetting('bot.messageStyle', 'text');
+    const third = await create();
+    await dispatchMessage(third.id);
+    expect(text).toHaveBeenCalledTimes(2);
+    expect(rich).toHaveBeenCalledTimes(2);
+  });
+  it('pagina categorias sem ultrapassar dez opções na lista e mantém o modo texto disponível', async () => {
+    for (let i = 0; i < 10; i++)
+      await db.provider.create({
+        data: {
+          key: `extra-${i}`,
+          externalId: 100 + i,
+          name: `Categoria ${i}`,
+          sortOrder: i + 1,
+          products: {
+            create: {
+              slug: `extra-product-${i}`,
+              externalId: 100 + i,
+              name: `Produto ${i}`,
+              costUsd: '1',
+              catalogPriceUsd: '1',
+              deliveryType: 'COUPON',
+              stock: 10,
+              maxQuantity: 10,
+              available: true,
+              authorizedResale: true,
+              bulkTiers: [],
+            },
+          },
+        },
+      });
+    async function receive(text: string) {
+      const event = await db.webhookEvent.create({
+        data: {
+          key: randomUUID(),
+          source: 'evolution',
+          encryptedPayload: encrypt(
+            JSON.stringify({
+              instance: 'store',
+              data: {
+                key: { id: randomUUID(), remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+                message: { conversation: text },
+              },
+            }),
+          ),
+        },
+      });
+      await processIncoming(event.id);
+      return db.message.findUniqueOrThrow({ where: { key: `reply-${event.key}` } });
+    }
+    await receive('oi');
+    const first = JSON.parse(decrypt((await receive('1')).encryptedInteractive!)) as Interactive;
+    expect(first.type).toBe('list');
+    if (first.type !== 'list') throw Error('Expected list');
+    expect(first.rows).toHaveLength(10);
+    const firstKeys = (await db.conversation.findFirstOrThrow()).state as { options: string[] };
+    const next = first.rows.find((row) => row.title === 'Mais categorias')!;
+    const second = JSON.parse(
+      decrypt((await receive(next.id)).encryptedInteractive!),
+    ) as Interactive;
+    expect(second.type).toBe('list');
+    if (second.type !== 'list') throw Error('Expected list');
+    expect(second.rows).toHaveLength(4);
+    const secondKeys = (await db.conversation.findFirstOrThrow()).state as { options: string[] };
+    expect(firstKeys.options.filter((k) => secondKeys.options.includes(k))).toEqual([]);
+    await saveSetting('bot.messageStyle', 'text');
+    const plain = await receive('menu');
+    expect(plain.encryptedInteractive).toBeNull();
+    expect(decrypt(plain.encryptedText)).toContain('1 - Ver produtos');
+  });
   it('ignora grupos na entrada HTTP e no processamento de eventos já persistidos', async () => {
     const app = await buildApp();
     const payload = {

@@ -1,8 +1,10 @@
 import { db, transaction } from '../core/db.js';
 import { decrypt, encrypt } from '../core/crypto.js';
-import { evolution } from '../integrations/evolution.js';
+import { evolution, InteractiveRejected } from '../integrations/evolution.js';
 import { AppError } from '../core/errors.js';
 import { messageTemplate } from './templates.js';
+import { interactiveSchema } from './interactive.js';
+import { setting } from '../core/settings.js';
 
 export async function prepareDeliveries() {
   const rows = await db.delivery.findMany({
@@ -47,6 +49,26 @@ export async function dispatchMessage(id: string) {
     data: { status: 'SENDING', attempts: { increment: 1 } },
   });
   try {
+    const sendText = () =>
+      evolution.sendText(row.instanceName, row.customer.phone, decrypt(row.encryptedText));
+    const sendMenu = async () => {
+      if (
+        !row.encryptedInteractive ||
+        (await setting('bot.messageStyle', 'interactive')) === 'text'
+      )
+        return sendText();
+      try {
+        return await evolution.sendInteractive(
+          row.instanceName,
+          row.customer.phone,
+          interactiveSchema.parse(JSON.parse(decrypt(row.encryptedInteractive))),
+        );
+      } catch (e) {
+        if (!(e instanceof InteractiveRejected)) throw e;
+        console.warn(JSON.stringify({ event: 'interactive.rejected', instance: row.instanceName }));
+        return sendText();
+      }
+    };
     const result = row.encryptedMedia
       ? await evolution.sendMedia(
           row.instanceName,
@@ -56,7 +78,7 @@ export async function dispatchMessage(id: string) {
           row.fileName ?? undefined,
           decrypt(row.encryptedText),
         )
-      : await evolution.sendText(row.instanceName, row.customer.phone, decrypt(row.encryptedText));
+      : await sendMenu();
     const externalMessageId = (result.key as { id?: string } | undefined)?.id;
     if (!externalMessageId)
       throw new AppError('SEND_UNKNOWN', 'Confirmação técnica de envio ausente.');

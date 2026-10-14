@@ -726,6 +726,7 @@ export async function buildApp() {
         'messages.welcome',
         'bot.greetings',
         'bot.activationKeywords',
+        'bot.messageStyle',
         'pix.gateway',
         'pix.expayStoreId',
       ];
@@ -739,11 +740,13 @@ export async function buildApp() {
                 ? await activationKeywords()
                 : await setting(
                     key,
-                    key === 'pix.gateway'
-                      ? env.PIX_GATEWAY
-                      : key === 'pix.expayStoreId'
-                        ? env.EXPAY_STORE_ID
-                        : null,
+                    key === 'bot.messageStyle'
+                      ? 'interactive'
+                      : key === 'pix.gateway'
+                        ? env.PIX_GATEWAY
+                        : key === 'pix.expayStoreId'
+                          ? env.EXPAY_STORE_ID
+                          : null,
                   ),
             ]),
           ),
@@ -786,6 +789,7 @@ export async function buildApp() {
           'human.hours': z.string().max(300),
           'messages.welcome': z.string().min(1).max(3000).transform(validateTemplate),
           'bot.greetings': z.array(z.string().min(1).max(30)).max(20),
+          'bot.messageStyle': z.enum(['interactive', 'text']),
           'bot.activationKeywords': z
             .array(
               z

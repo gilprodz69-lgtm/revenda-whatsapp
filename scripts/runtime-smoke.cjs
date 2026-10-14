@@ -20,7 +20,8 @@ const db = new PrismaClient({ datasources: { db: { url } } });
 const redis = new Redis(redisUrl);
 const maintenance = new Queue('maintenance', { connection: { url: redisUrl } });
 let workerOutput = '',
-  sends = 0;
+  sends = 0,
+  interactiveSends = 0;
 const fixture = (handler, port) =>
   new Promise((resolve, reject) => {
     const server = createServer(handler);
@@ -76,7 +77,8 @@ const env = {
   );
   servers.push(
     await fixture((req, res) => {
-      if (req.url.includes('/message/sendText/')) sends++;
+      if (/\/message\/send(?:Text|Buttons|List)\//.test(req.url)) sends++;
+      if (req.url.includes('/message/sendButtons/')) interactiveSends++;
       send(
         res,
         req.url.includes('connectionState')
@@ -159,6 +161,7 @@ const env = {
     timings.push(elapsed);
   }
   if (sends !== 2) throw Error('Duplicate or missing WhatsApp reply: ' + sends);
+  if (interactiveSends !== 2) throw Error('Default menus did not use interactive buttons');
   if (!(await redis.get('worker:heartbeat'))) throw Error('Heartbeat do worker ausente.');
   console.log(
     'SMOKE PASS: API + worker, recovery scan disabled, replies (ms): ' +
