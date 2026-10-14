@@ -15,6 +15,7 @@ const dashboard = {
   chart: [],
 };
 async function mockApi(page: Page, loggedIn = true) {
+  const settings: Record<string, unknown> = {};
   await page.route('**/api/**', async (route) => {
     const req = route.request(),
       url = new URL(req.url());
@@ -50,15 +51,16 @@ async function mockApi(page: Page, loggedIn = true) {
         ],
         total: 1,
       };
-    else if (url.pathname === '/api/settings')
+    else if (url.pathname === '/api/settings') {
+      if (req.method() === 'PUT') Object.assign(settings, req.postDataJSON());
       body = {
-        values: {},
+        values: settings,
         secrets: {},
         environment: {},
         rates: [],
         templates: [{ key: 'summary', label: 'Resumo do pedido', text: 'Total: R$ {valor}' }],
       };
-    else if (url.pathname === '/api/whatsapp') body = [];
+    } else if (url.pathname === '/api/whatsapp') body = [];
     else body = { data: [], total: 0 };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -116,6 +118,26 @@ test('não mostra segredos persistidos e permite editar template', async ({ page
   expect((await mutation).postDataJSON()).toEqual({
     'messages.summary': 'Compra: {produto} por {valor}',
   });
+});
+
+test('salva palavras de ativação no admin e mantém após recarregar', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Configurações');
+  const field = page.getByLabel('Palavras-chave para iniciar o bot');
+  await field.fill('comprar, quero comprar, vendas');
+  const mutation = page.waitForRequest(
+    (req) => req.method() === 'PUT' && req.url().endsWith('/settings'),
+  );
+  await page.getByRole('button', { name: 'Salvar atendimento', exact: true }).click();
+  expect((await mutation).postDataJSON()['bot.activationKeywords']).toEqual([
+    'comprar',
+    'quero comprar',
+    'vendas',
+  ]);
+  await page.reload();
+  await navigate(page, 'Configurações');
+  await expect(field).toHaveValue('comprar, quero comprar, vendas');
 });
 test('configura Expay e mantém a chave fora dos valores retornados', async ({ page }) => {
   await mockApi(page);

@@ -7,6 +7,7 @@ import { env } from '../config.js';
 import { pixGateway, type PixPayer, type PixCharge } from '../integrations/pix.js';
 import { mutateWallet } from './wallet.js';
 import { messageTemplate } from './templates.js';
+import { notifyOutgoing } from '../core/dispatch.js';
 
 export async function createDeposit(
   customerId: string,
@@ -160,4 +161,5 @@ export async function reconcilePayment(gatewayId: string) {
       });
     } else await tx.payment.update({ where: { id: current.id }, data: { updatedAt: new Date() } });
   });
+  await notifyOutgoing({ customerId: payment.customerId, instanceName: payment.instanceName });
 }

@@ -14,6 +14,11 @@ destination=${target#v}
 declared=$(git show "$target:package.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
 [[ "$declared" == "$destination" ]] || error 'A tag de destino não corresponde à versão do package.json.'
 [[ ${installed%%.*} == ${destination%%.*} ]] || error 'Atualização de versão principal exige revisão manual de compatibilidade e migrações.'
+if [[ "$current" == "$(git rev-parse "$target^{commit}")" && "$installed" == "$destination" ]]; then
+	bash scripts/healthcheck.sh --internal
+	echo "A instalação já está atualizada: $destination. Configurações e dados preservados."
+	exit 0
+fi
 bash scripts/backup.sh
 printf '%s\n' "$current" >secrets/rollback-commit
 dc stop -t 90 api worker >/dev/null

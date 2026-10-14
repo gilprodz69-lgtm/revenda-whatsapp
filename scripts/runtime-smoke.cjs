@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { PrismaClient } = require('@prisma/client');
 const Redis = require('ioredis');
+const { Queue } = require('bullmq');
 const root = path.resolve(__dirname, '..');
 const url = process.env.DATABASE_URL;
 const redisUrl = process.env.REDIS_URL;
@@ -17,6 +18,9 @@ if (
   throw new Error('Smoke exige DATABASE_URL revenda_test e REDIS_URL com DB 15.');
 const db = new PrismaClient({ datasources: { db: { url } } });
 const redis = new Redis(redisUrl);
+const maintenance = new Queue('maintenance', { connection: { url: redisUrl } });
+let workerOutput = '',
+  sends = 0;
 const fixture = (handler, port) =>
   new Promise((resolve, reject) => {
     const server = createServer(handler);
@@ -59,30 +63,27 @@ const env = {
     update: { state: 'open' },
   });
   servers.push(
-    await fixture(
-      (req, res) =>
-        send(
-          res,
-          req.url.startsWith('/health')
-            ? { ok: true, service: 'partner-api', version: 1 }
-            : req.url.startsWith('/balance')
-              ? { ok: true, balance: '0.00', currency: 'USD' }
-              : { data: [] },
-        ),
-      16500,
-    ),
+    await fixture((req, res) => {
+      send(
+        res,
+        req.url.startsWith('/health')
+          ? { ok: true, service: 'partner-api', version: 1 }
+          : req.url.startsWith('/balance')
+            ? { ok: true, balance: '0.00', currency: 'USD' }
+            : { data: [] },
+      );
+    }, 16500),
   );
   servers.push(
-    await fixture(
-      (req, res) =>
-        send(
-          res,
-          req.url.includes('connectionState')
-            ? { instance: { state: 'open' } }
-            : { key: { id: randomUUID() } },
-        ),
-      16600,
-    ),
+    await fixture((req, res) => {
+      if (req.url.includes('/message/sendText/')) sends++;
+      send(
+        res,
+        req.url.includes('connectionState')
+          ? { instance: { state: 'open' } }
+          : { key: { id: randomUUID() } },
+      );
+    }, 16600),
   );
   for (const file of ['server', 'worker']) {
     const child = spawn(process.execPath, [`dist/${file}.js`], {
@@ -95,7 +96,9 @@ const env = {
       console.error(e.message);
       process.exitCode = 1;
     });
-    child.stdout.on('data', () => {});
+    child.stdout.on('data', (data) => {
+      if (file === 'worker') workerOutput += data.toString();
+    });
     child.stderr.on('data', (data) => process.stderr.write(data));
     children.push(child);
   }
@@ -107,34 +110,61 @@ const env = {
     if (i === 99) throw Error('API não ficou pronta.');
     await new Promise((r) => setTimeout(r, 200));
   }
-  const id = `smoke-${randomUUID()}`;
-  const response = await fetch('http://127.0.0.1:15300/webhooks/evolution', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-webhook-secret': env.WEBHOOK_SECRET },
-    body: JSON.stringify({
-      event: 'messages.upsert',
-      instance,
-      data: {
-        key: { id, remoteJid: '5511888888888@s.whatsapp.net', fromMe: false },
-        message: { conversation: 'oi' },
-      },
-    }),
-  });
-  if (response.status !== 202) throw Error('Webhook recusado: ' + response.status);
-  let sent = false;
-  for (let i = 0; i < 180; i++) {
-    const row = await db.message.findUnique({
-      where: { key: `reply-evolution-${instance}-${id}` },
-    });
-    if (row?.status === 'SENT') {
-      sent = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; !workerOutput.includes('"event":"worker.ready"'); i++) {
+    if (i === 100) throw Error('Worker startup timeout');
+    await new Promise((r) => setTimeout(r, 100));
   }
-  if (!sent) throw Error('Worker não enviou a resposta persistida.');
+  // Prove normal replies do not depend on the 15-second recovery scan.
+  await maintenance.removeJobScheduler('pump');
+  for (let i = 0; ; i++) {
+    const jobs = await maintenance.getJobs(['active', 'waiting']);
+    if (!jobs.some((job) => job.name === 'pump')) break;
+    if (i === 100) throw Error('Recovery scan did not finish');
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const timings = [];
+  for (const text of ['oi', 'menu']) {
+    const id = `smoke-${randomUUID()}`;
+    const started = Date.now();
+    const request = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-webhook-secret': env.WEBHOOK_SECRET },
+      body: JSON.stringify({
+        event: 'messages.upsert',
+        instance,
+        data: {
+          key: { id, remoteJid: '5511888888888@s.whatsapp.net', fromMe: false },
+          message: { conversation: text },
+        },
+      }),
+    };
+    for (let duplicate = 0; duplicate < 2; duplicate++) {
+      const response = await fetch('http://127.0.0.1:15300/webhooks/evolution', request);
+      if (response.status !== 202) throw Error('Webhook recusado: ' + response.status);
+    }
+    let sent = false;
+    for (let i = 0; i < 100; i++) {
+      const row = await db.message.findUnique({
+        where: { key: `reply-evolution-${instance}-${id}` },
+      });
+      if (row?.status === 'SENT') {
+        sent = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!sent) throw Error('Worker não enviou a resposta persistida.');
+    const elapsed = Date.now() - started;
+    if (elapsed >= 5000) throw Error('Reply exceeded 5 seconds without recovery scan');
+    timings.push(elapsed);
+  }
+  if (sends !== 2) throw Error('Duplicate or missing WhatsApp reply: ' + sends);
   if (!(await redis.get('worker:heartbeat'))) throw Error('Heartbeat do worker ausente.');
-  console.log('SMOKE PASS: API real + webhook + filas + worker + outbox + Evolution mock.');
+  console.log(
+    'SMOKE PASS: API + worker, recovery scan disabled, replies (ms): ' +
+      timings.join(', ') +
+      '; no duplicate sends.',
+  );
 })()
   .catch((e) => {
     console.error(e.message);
@@ -151,5 +181,6 @@ const env = {
     }
     for (const server of servers) await new Promise((r) => server.close(r));
     await db.$disconnect();
+    await maintenance.close();
     await redis.quit();
   });

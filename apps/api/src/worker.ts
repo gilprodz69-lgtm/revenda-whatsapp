@@ -20,6 +20,7 @@ import { AppError } from './core/errors.js';
 import { withLock } from './core/lock.js';
 import { evolution } from './integrations/evolution.js';
 import { recordEventFailure } from './modules/events.js';
+import { notifyOutgoing } from './core/dispatch.js';
 
 async function processEvent(id: string) {
   const event = await db.webhookEvent.findUniqueOrThrow({ where: { id } });
@@ -77,13 +78,7 @@ async function pump() {
       { id: order.id },
       { jobId: `order-${order.id}-${Math.floor(Date.now() / 300000)}` },
     );
-  const messages = await db.message.findMany({
-    where: { direction: 'OUT', status: 'PENDING', instance: { state: 'open' } },
-    orderBy: { createdAt: 'asc' },
-    take: 200,
-  });
-  for (const message of messages)
-    await outgoingQueue.add('send', { id: message.id }, { jobId: `send-${message.id}` });
+  await notifyOutgoing();
   const stale = await db.message.findMany({
     where: { status: 'SENDING', updatedAt: { lt: new Date(Date.now() - 180000) } },
     select: { id: true },
@@ -139,10 +134,19 @@ const workers = [
     connection: queueConnection,
     concurrency: 1,
   }),
-  new Worker('orders', (job) => withLock(`order:${job.data.id}`, () => processOrder(job.data.id)), {
-    connection: queueConnection,
-    concurrency: 2,
-  }),
+  new Worker(
+    'orders',
+    (job) =>
+      withLock(`order:${job.data.id}`, async () => {
+        await processOrder(job.data.id);
+        await prepareDeliveries();
+        await notifyOutgoing();
+      }),
+    {
+      connection: queueConnection,
+      concurrency: 2,
+    },
+  ),
   new Worker('outgoing', (job) => dispatchMessage(job.data.id), {
     connection: queueConnection,
     concurrency: 1,
@@ -216,6 +220,7 @@ await maintenanceQueue.upsertJobScheduler(
   { name: 'retention', data: {} },
 );
 await pump();
+console.log(JSON.stringify({ event: 'worker.ready' }));
 for (const signal of ['SIGTERM', 'SIGINT'])
   process.on(signal, async () => {
     await Promise.all(workers.map((w) => w.close()));

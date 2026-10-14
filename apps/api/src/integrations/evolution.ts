@@ -123,3 +123,13 @@ export function normalizePhone(jid: string): string | null {
   const phone = jid.split('@')[0]!;
   return /^\d{8,15}$/.test(phone) ? phone : null;
 }
+export function privateSenderPhone(key: {
+  remoteJid: string;
+  remoteJidAlt?: string;
+  fromMe: boolean;
+}) {
+  if (key.fromMe) return null;
+  if (key.remoteJid.endsWith('@s.whatsapp.net')) return normalizePhone(key.remoteJid);
+  if (key.remoteJid.endsWith('@lid')) return normalizePhone(key.remoteJidAlt ?? '');
+  return null;
+}

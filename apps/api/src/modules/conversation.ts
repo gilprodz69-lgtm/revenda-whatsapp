@@ -5,7 +5,9 @@ import { encrypt, decrypt } from '../core/crypto.js';
 import { AppError } from '../core/errors.js';
 import { setting } from '../core/settings.js';
 import { withLock } from '../core/lock.js';
-import { incomingSchema, normalizePhone } from '../integrations/evolution.js';
+import { incomingSchema, privateSenderPhone } from '../integrations/evolution.js';
+import { notifyOutgoing, notifyOrder } from '../core/dispatch.js';
+import { activationKeywords, matchesActivation } from './bot-activation.js';
 import { quoteProduct, placeOrder } from './orders.js';
 import { createDeposit } from './payments.js';
 import { templates, messageTemplate } from './templates.js';
@@ -61,10 +63,11 @@ export async function processIncoming(eventId: string) {
     data: unknown;
   };
   const message = incomingSchema.parse(payload.data);
-  if (message.key.fromMe) return;
-  const phone =
-    normalizePhone(message.key.remoteJid) ?? normalizePhone(message.key.remoteJidAlt ?? '');
-  if (!phone) return;
+  const phone = privateSenderPhone(message.key);
+  if (!phone) {
+    await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
+    return;
+  }
   await withLock(`conversation:${payload.instance}:${phone}`, async () => {
     const instance = await db.whatsappInstance.findUnique({ where: { name: payload.instance } });
     if (!instance) {
@@ -77,6 +80,27 @@ export async function processIncoming(eventId: string) {
       message.message?.buttonsResponseMessage?.selectedButtonId ??
       message.message?.listResponseMessage?.singleSelectReply?.selectedRowId ??
       '';
+    const existingCustomer = await db.customer.findUnique({ where: { phone } });
+    const current = existingCustomer
+      ? await db.conversation.findUnique({
+          where: {
+            customerId_instanceName: {
+              customerId: existingCustomer.id,
+              instanceName: instance.name,
+            },
+          },
+        })
+      : null;
+    const active = !!current && current.expiresAt > new Date();
+    const trigger = matchesActivation(raw, await activationKeywords());
+    if (
+      !active &&
+      !trigger &&
+      !(existingCustomer?.humanUntil && existingCustomer.humanUntil > new Date())
+    ) {
+      await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
+      return;
+    }
     const customer = await db.customer.upsert({
       where: { phone },
       create: {
@@ -87,9 +111,6 @@ export async function processIncoming(eventId: string) {
       },
       update: {},
     });
-    const current = await db.conversation.findUnique({
-      where: { customerId_instanceName: { customerId: customer.id, instanceName: instance.name } },
-    });
     let state: State =
       current && current.expiresAt > new Date()
         ? stateSchema.parse(current.state)
@@ -97,6 +118,7 @@ export async function processIncoming(eventId: string) {
     let response = '';
     let qr: string | undefined;
     let humanUntil: Date | undefined;
+    let createdOrderId: string | undefined;
     const input = normalizedInput(raw),
       store = await setting('store.name', 'Nossa loja');
     const mainMenu = async () => messageTemplate('welcome', { nome: customer.name, loja: store });
@@ -161,21 +183,15 @@ export async function processIncoming(eventId: string) {
         (customer.humanUntil && customer.humanUntil > new Date())
       )
         response = '';
+      else if (['suporte', 'atendente', 'humano'].includes(input)) response = await startHuman();
       else if (
-        [
-          'menu',
-          'oi',
-          'ola',
-          'inicio',
-          '0',
-          'cancelar',
-          ...(await setting<string[]>('bot.greetings', [])),
-        ].includes(input)
+        (!active && trigger) ||
+        (state.step === 'MENU' && trigger) ||
+        ['menu', 'oi', 'ola', 'inicio', '0', 'cancelar'].includes(input)
       ) {
         state = { step: 'MENU' };
         response = await mainMenu();
-      } else if (['suporte', 'atendente', 'humano'].includes(input)) response = await startHuman();
-      else if (input === 'voltar') {
+      } else if (input === 'voltar') {
         if (state.step === 'PRODUCTS') response = await showProviders();
         else if (state.provider) response = await showProducts(state.provider);
         else {
@@ -256,6 +272,7 @@ export async function processIncoming(eventId: string) {
           });
           state = { step: 'MENU' };
           response = await messageTemplate('processing', { pedido: order.id.slice(0, 8) });
+          createdOrderId = order.id;
         }
       } else if (state.step === 'DEPOSIT_AMOUNT') {
         if (
@@ -363,5 +380,7 @@ export async function processIncoming(eventId: string) {
         });
       await tx.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
     });
+    await notifyOutgoing({ customerId: customer.id, instanceName: instance.name });
+    if (createdOrderId) await notifyOrder(createdOrderId);
   });
 }

@@ -17,7 +17,7 @@ export const orderQueue = new Queue('orders', {
 });
 export const outgoingQueue = new Queue('outgoing', {
   connection: queueConnection,
-  defaultJobOptions: { ...defaults, attempts: 1 },
+  defaultJobOptions: { ...defaults, attempts: 1, removeOnComplete: true },
 });
 export const maintenanceQueue = new Queue('maintenance', {
   connection: queueConnection,

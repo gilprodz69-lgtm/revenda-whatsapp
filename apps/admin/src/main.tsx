@@ -1021,9 +1021,9 @@ function App() {
                                 'store.name': f.get('store'),
                                 'human.hours': f.get('hours'),
                                 'messages.welcome': f.get('welcome'),
-                                'bot.greetings': String(f.get('greetings') ?? '')
-                                  .split(',')
-                                  .map((v) => v.trim().toLowerCase())
+                                'bot.activationKeywords': String(f.get('activationKeywords') ?? '')
+                                  .split(/[,\n]/)
+                                  .map((v) => v.trim())
                                   .filter(Boolean),
                               });
                             } catch {}
@@ -1043,10 +1043,26 @@ function App() {
                             }
                           />
                           <Field
-                            name="greetings"
-                            label="Saudações adicionais (separadas por vírgula)"
-                            defaultValue={(data.values['bot.greetings'] ?? []).join(', ')}
+                            name="activationKeywords"
+                            label="Palavras-chave para iniciar o bot"
+                            defaultValue={(
+                              data.values['bot.activationKeywords'] ?? [
+                                'oi',
+                                'olá',
+                                'menu',
+                                'início',
+                                'suporte',
+                                'atendente',
+                                'humano',
+                              ]
+                            ).join(', ')}
                           />
+                          <small className="muted">
+                            Separe palavras ou frases por vírgula. O bot inicia somente no privado
+                            quando a mensagem corresponde a uma delas, ignorando maiúsculas e
+                            acentos. Depois de iniciado, o cliente pode navegar pelas opções. Deixar
+                            vazio impede iniciar novas conversas.
+                          </small>
                           <Field name="welcome" label="Mensagem de boas-vindas">
                             <textarea
                               name="welcome"

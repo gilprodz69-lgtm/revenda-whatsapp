@@ -296,6 +296,80 @@ describe('Ledger transacional, pedidos e recuperação', () => {
   });
 });
 describe('Catálogo, webhooks e fluxo completo', () => {
+  it('ignora grupos na entrada HTTP e no processamento de eventos já persistidos', async () => {
+    const app = await buildApp();
+    const payload = {
+      instance: 'store',
+      event: 'messages.upsert',
+      data: {
+        key: {
+          id: 'group',
+          remoteJid: '12000@g.us',
+          remoteJidAlt: '5511999999999@s.whatsapp.net',
+          fromMe: false,
+        },
+        message: { conversation: 'oi' },
+      },
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhooks/evolution',
+      headers: { 'x-webhook-secret': process.env.WEBHOOK_SECRET },
+      payload,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(await db.webhookEvent.count()).toBe(0);
+    const event = await db.webhookEvent.create({
+      data: {
+        key: 'old-group',
+        source: 'evolution',
+        encryptedPayload: encrypt(JSON.stringify(payload)),
+      },
+    });
+    await processIncoming(event.id);
+    expect(await db.message.count()).toBe(0);
+    expect(await db.conversation.count()).toBe(0);
+    expect(
+      (await db.webhookEvent.findUniqueOrThrow({ where: { id: event.id } })).processedAt,
+    ).not.toBeNull();
+    await app.close();
+  });
+  it('exige palavra configurada para iniciar e permite continuar pelo menu até a sessão expirar', async () => {
+    await saveSetting('bot.activationKeywords', ['Quero comprar']);
+    async function receive(text: string) {
+      const event = await db.webhookEvent.create({
+        data: {
+          key: randomUUID(),
+          source: 'evolution',
+          encryptedPayload: encrypt(
+            JSON.stringify({
+              instance: 'store',
+              data: {
+                key: { id: randomUUID(), remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+                message: { conversation: text },
+              },
+            }),
+          ),
+        },
+      });
+      await processIncoming(event.id);
+    }
+    await receive('oi');
+    await receive('1');
+    expect(await db.message.count()).toBe(0);
+    await receive('QUERO   COMPRAR!');
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+    const reply = await db.message.findFirstOrThrow({ where: { direction: 'OUT' } });
+    expect(await outgoingQueue.getJob(`send-${reply.id}`)).toBeDefined();
+    await receive('1');
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'PROVIDERS' });
+    await db.conversation.updateMany({ data: { expiresAt: new Date(0) } });
+    await receive('1');
+    expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(2);
+    await saveSetting('bot.activationKeywords', []);
+    await receive('Quero comprar');
+    expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(2);
+  });
   it('reconstrói a navegação voltar e permite solicitar suporte em qualquer etapa', async () => {
     for (const [i, text] of ['oi', '1', 'voltar', '1', '1', '1', 'suporte'].entries()) {
       const event = await db.webhookEvent.create({
@@ -376,6 +450,8 @@ describe('Catálogo, webhooks e fluxo completo', () => {
         ).statusCode,
       ).toBe(202);
     expect(await db.webhookEvent.count()).toBe(1);
+    const stored = await db.webhookEvent.findFirstOrThrow();
+    expect(await incomingQueue.getJob(`event-${stored.id}`)).toBeDefined();
     await app.inject({
       method: 'POST',
       url: '/webhooks/evolution',
@@ -659,6 +735,65 @@ describe('Expay Brasil', () => {
   });
 });
 describe('Autenticação, filas e proteção de webhooks financeiros', () => {
+  it('permite ao proprietário salvar palavras-chave sem alterar credenciais ou configurações existentes', async () => {
+    const owner = await db.admin.create({
+      data: {
+        email: 'owner@test.example',
+        passwordHash: await argon2.hash('Test-password-12345'),
+        role: 'OWNER',
+      },
+    });
+    await saveSetting('store.name', 'Minha loja');
+    await saveSetting('secret.expayApiKey', 'TEST-KEY', true);
+    await saveSetting('bot.greetings', ['legado']);
+    const app = await buildApp();
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: 'http://localhost:5173' },
+      payload: { email: owner.email, password: 'Test-password-12345' },
+    });
+    const headers = {
+      cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join('; '),
+      origin: 'http://localhost:5173',
+      'x-csrf-token': login.json().csrf,
+    };
+    const initial = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(initial.json().values['bot.activationKeywords']).toContain('legado');
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          headers,
+          payload: { 'bot.activationKeywords': [' Vendas ', 'vendas', 'Olá'] },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const settings = (await app.inject({ method: 'GET', url: '/api/settings', headers })).json();
+    expect(settings.values['bot.activationKeywords']).toEqual(['vendas', 'Olá']);
+    expect(settings.values['store.name']).toBe('Minha loja');
+    expect(settings.secrets['secret.expayApiKey']).toBe(true);
+    expect((await db.admin.findUniqueOrThrow({ where: { id: owner.id } })).passwordHash).toBe(
+      owner.passwordHash,
+    );
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          headers,
+          payload: { 'bot.activationKeywords': [] },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/settings', headers })).json().values[
+        'bot.activationKeywords'
+      ],
+    ).toEqual([]);
+    await app.close();
+  });
   it('retorna dashboard por período e filtros de catálogo com preços em Decimal', async () => {
     await db.admin.create({
       data: {

@@ -23,7 +23,10 @@ import {
   evolutionEventSchema,
   incomingSchema,
   normalizePhone,
+  privateSenderPhone,
 } from './integrations/evolution.js';
+import { notifyIncoming, notifyOutgoing } from './core/dispatch.js';
+import { activationKeywords, normalizeKeyword } from './modules/bot-activation.js';
 import { pixGateway, expayNotificationChargeId } from './integrations/pix.js';
 import { partner } from './integrations/partner.js';
 import { orderQueue } from './core/queues.js';
@@ -144,17 +147,12 @@ export async function buildApp() {
           event,
         )
       )
-        return { accepted: true };
+        return reply.code(202).send({ accepted: true });
       if (event === 'messages.upsert') {
         const parsed = incomingSchema.parse(payload.data);
-        if (
-          parsed.key.fromMe ||
-          parsed.key.remoteJid.endsWith('@g.us') ||
-          !(normalizePhone(parsed.key.remoteJid) ?? normalizePhone(parsed.key.remoteJidAlt ?? ''))
-        )
-          return { accepted: true };
+        if (!privateSenderPhone(parsed.key)) return reply.code(202).send({ accepted: true });
         const key = `evolution-${payload.instance}-${parsed.key.id}`;
-        await db.webhookEvent.upsert({
+        const stored = await db.webhookEvent.upsert({
           where: { key },
           create: {
             key,
@@ -165,13 +163,15 @@ export async function buildApp() {
           },
           update: {},
         });
+        await notifyIncoming(stored);
       } else {
         const key = `evolution-${payload.instance}-${event}-${hash(JSON.stringify(payload.data))}-${Math.floor(Date.now() / 10000)}`;
-        await db.webhookEvent.upsert({
+        const stored = await db.webhookEvent.upsert({
           where: { key },
           create: { key, source: 'evolution', encryptedPayload: encrypt(JSON.stringify(payload)) },
           update: {},
         });
+        await notifyIncoming(stored);
       }
       return reply.code(202).send({ accepted: true });
     },
@@ -197,7 +197,7 @@ export async function buildApp() {
     if (String(body.data.id) !== query['data.id'])
       throw new AppError('INVALID_NOTIFICATION', 'Notificação divergente.', 400);
     const key = `pix-${hash(`${query['data.id']}-${requestId}-${signature}`)}`;
-    await db.webhookEvent.upsert({
+    const stored = await db.webhookEvent.upsert({
       where: { key },
       create: {
         key,
@@ -206,6 +206,7 @@ export async function buildApp() {
       },
       update: {},
     });
+    await notifyIncoming(stored);
     return reply.code(202).send({ accepted: true });
   });
   app.post(
@@ -218,7 +219,7 @@ export async function buildApp() {
         if (payment?.gateway === 'expay') {
           // Callbacks only trigger an authenticated API lookup; their status and amount are never trusted.
           const key = `expay-${gatewayId}-${Math.floor(Date.now() / 15000)}`;
-          await db.webhookEvent.upsert({
+          const stored = await db.webhookEvent.upsert({
             where: { key },
             create: {
               key,
@@ -227,6 +228,7 @@ export async function buildApp() {
             },
             update: {},
           });
+          await notifyIncoming(stored);
         }
       }
       return reply.code(202).send({ accepted: true });
@@ -571,7 +573,9 @@ export async function buildApp() {
         requirePermission(request, 'operate');
         const { id } = idSchema.parse(request.params);
         const { reason } = z.object({ reason: z.string().min(10).max(300) }).parse(request.body);
-        return controlledResend(id, request.admin.id, reason);
+        const result = await controlledResend(id, request.admin.id, reason);
+        await notifyOutgoing();
+        return result;
       });
       admin.get('/payments', async (request) => {
         const q = paging.parse(request.query);
@@ -692,7 +696,7 @@ export async function buildApp() {
         const body = z
           .object({ instanceName: z.string(), text: z.string().min(1).max(5000) })
           .parse(request.body);
-        return transaction(async (tx) => {
+        const sent = await transaction(async (tx) => {
           const result = await tx.message.create({
             data: {
               key: `human-${crypto.randomUUID()}`,
@@ -712,6 +716,8 @@ export async function buildApp() {
           });
           return { id: result.id };
         });
+        await notifyOutgoing({ customerId: id, instanceName: body.instanceName });
+        return sent;
       });
       const publicKeys = [
         'store.name',
@@ -719,6 +725,7 @@ export async function buildApp() {
         'human.hours',
         'messages.welcome',
         'bot.greetings',
+        'bot.activationKeywords',
         'pix.gateway',
         'pix.expayStoreId',
       ];
@@ -728,14 +735,16 @@ export async function buildApp() {
           await Promise.all(
             publicKeys.map(async (key) => [
               key,
-              await setting(
-                key,
-                key === 'pix.gateway'
-                  ? env.PIX_GATEWAY
-                  : key === 'pix.expayStoreId'
-                    ? env.EXPAY_STORE_ID
-                    : null,
-              ),
+              key === 'bot.activationKeywords'
+                ? await activationKeywords()
+                : await setting(
+                    key,
+                    key === 'pix.gateway'
+                      ? env.PIX_GATEWAY
+                      : key === 'pix.expayStoreId'
+                        ? env.EXPAY_STORE_ID
+                        : null,
+                  ),
             ]),
           ),
         );
@@ -777,6 +786,19 @@ export async function buildApp() {
           'human.hours': z.string().max(300),
           'messages.welcome': z.string().min(1).max(3000).transform(validateTemplate),
           'bot.greetings': z.array(z.string().min(1).max(30)).max(20),
+          'bot.activationKeywords': z
+            .array(
+              z
+                .string()
+                .trim()
+                .min(1)
+                .max(80)
+                .refine((v) => !!normalizeKeyword(v)),
+            )
+            .max(50)
+            .transform((values) => [
+              ...new Map(values.map((value) => [normalizeKeyword(value), value])).values(),
+            ]),
           'pix.gateway': z.enum(['disabled', 'expay', 'mercadopago']),
           'pix.expayStoreId': z.string().max(255),
           'secret.expayApiKey': z.string().min(16).max(500),

@@ -21,6 +21,14 @@ Use Consultar conexão para obter estado atual; depois Conectar ou Reconectar. Q
 
 Mensagens pendentes ficam na outbox durante desconexão. Envios com resultado desconhecido não são repetidos automaticamente. Abra o histórico/WhatsApp conectado e use reenvio auditado da entrega após verificar o destinatário e a situação.
 
+### Ativação e tempo de resposta
+
+Em **Configurações → Palavras-chave para iniciar o bot**, cadastre palavras ou frases separadas por vírgula e clique em **Salvar atendimento**. O texto inteiro deve corresponder a uma entrada; diferenças de caixa, acentos, espaços repetidos e pontuação final `.!?` são ignoradas. Por exemplo, `comprar, quero comprar, vendas`. Deixar vazio impede novos atendimentos automáticos. Sessões já abertas continuam aceitando números e comandos do menu; expiram após 30 minutos sem interação. Saudações adicionais da versão anterior são preservadas até salvar a nova lista.
+
+O bot atende apenas conversas privadas: grupos são ignorados tanto no webhook quanto no worker, inclusive quando existe um telefone privado alternativo no evento. Isso também se aplica a eventos antigos ainda pendentes.
+
+Após persistir uma mensagem, a aplicação avisa imediatamente as filas de processamento e envio. A varredura de recuperação a cada 15 segundos permanece para falhas temporárias; não é mais necessária no caminho normal. O limite de 20 envios por minuto continua ativo. Filas cheias, desconexões, Evolution e chamadas externas ainda podem aumentar a latência.
+
 ### Pedido UNKNOWN / REVIEW
 
 Não libere saldo manualmente só porque houve timeout. Abra pedido, confira tentativas/requestId, saldo reservado e referência. Reconciliar busca pelo mesmo `externalOrderId` e repete o corpo original conforme a idempotência documentada. REVIEW interrompe novas tentativas automáticas. Escalone ao fornecedor se o resultado continuar incerto. Após localizar entrega válida, a captura acontece uma vez.
@@ -53,6 +61,8 @@ Backups: dumps de `revenda`/`evolution`, sessão Evolution, `.env`, versão e ma
 Restore exige confirmação literal, cria backup prévio e verifica que a ENCRYPTION_KEY corresponde. Não substitui automaticamente `.env`/senhas de banco do servidor. Para recuperar em VPS nova, recupere o `.env` original e a passphrase em ambiente protegido antes de inicializar os volumes; repita a instalação/migração com os segredos originais. Contas criadas pelo instalador não sobrescrevem as contas restauradas.
 
 ## Atualizar e rollback
+
+O comando único de [INSTALL_VPS.txt](../INSTALL_VPS.txt) instala a release estável mais recente em uma VPS nova e atualiza instalações existentes com backup. Não recria a configuração inicial nem redefine contas, chaves, banco ou sessões do WhatsApp. Repetir a mesma versão apenas verifica a saúde. A atualização pode interromper brevemente o atendimento enquanto os serviços são reconstruídos.
 
 Publique versões com tags explícitas (ex.: v1.0.1). O updater usa o remote `origin` do repositório configurado pelo operador, não uma URL inventada.
 

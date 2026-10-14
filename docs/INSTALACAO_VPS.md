@@ -11,7 +11,7 @@
 
 ## Um comando
 
-Copie a linha de [INSTALL_VPS.txt](../INSTALL_VPS.txt) e execute na sessão SSH. Ela baixa o bootstrap público da tag `v1.0.0`, instala Git se necessário e inicia o assistente em `/opt/revenda-whatsapp`. As entradas do assistente são lidas do terminal, mesmo quando o bootstrap é baixado por um pipe. Você também pode gerar a linha com `node scripts/vps-command.cjs` no computador de desenvolvimento.
+Copie a linha de [INSTALL_VPS.txt](../INSTALL_VPS.txt) e execute na sessão SSH. Ela baixa o bootstrap público de `main`, consulta a release estável mais recente e instala essa tag em `/opt/revenda-whatsapp`. Instala Git/Python se necessário. Em uma instalação existente, executa a atualização com backup, sem pedir novamente os dados iniciais. As entradas do assistente inicial são lidas do terminal, mesmo quando o bootstrap é baixado por um pipe. Você também pode gerar a linha com `node scripts/vps-command.cjs` no computador de desenvolvimento.
 
 O assistente pedirá:
 
@@ -46,13 +46,15 @@ Abra `https://SEU_DOMINIO` e entre com o e-mail/senha definidos. Confira as etap
 
 ## Repetir, atualizar e diagnosticar
 
-Repetir o comando usa a pasta existente e mantém `.env`, bancos, volumes e contas. Ele rejeita uma pasta que pertença a outro repositório e não busca silenciosamente uma versão mais nova. Para corrigir uma instalação interrompida:
+Repetir o novo comando de [INSTALL_VPS.txt](../INSTALL_VPS.txt) usa a pasta existente e atualiza para a release estável mais recente. Mantém `.env`, domínio, senhas, chaves, bancos, volumes, contas, sessões do WhatsApp e configurações salvas no painel. Antes de mudar a versão, gera backup criptografado; se o backup falhar, a atualização para. Se a versão já estiver instalada, verifica a saúde sem reinstalar. Pastas de outro repositório e alterações locais em arquivos versionados são rejeitadas. Comandos antigos fixados em `v1.0.0` devem ser substituídos pela linha atual.
+
+Para retomar uma instalação inicial interrompida, mantendo os dados já informados:
 
 ```bash
 sudo bash /opt/revenda-whatsapp/scripts/install.sh
 ```
 
-Para atualizar, execute `sudo bash /opt/revenda-whatsapp/scripts/update.sh vX.Y.Z` com uma tag realmente publicada. Não é preciso autenticar no GitHub. Confira backup e compatibilidade em [operação](OPERACAO.md).
+Também é possível escolher uma versão específica com `sudo bash /opt/revenda-whatsapp/scripts/update.sh vX.Y.Z`, usando uma tag realmente publicada. Não é preciso autenticar no GitHub. Confira backup e compatibilidade em [operação](OPERACAO.md).
 
 O comando preserva `SSH_CONNECTION` ao usar sudo para detectar a porta da sessão atual. As portas também são lidas de `sshd -T`. Se usar um encaminhamento incomum, informe explicitamente `SSH_PORT` ao executar o instalador; regras existentes do UFW são preservadas. Nenhuma porta de PostgreSQL, Redis ou Evolution é exposta publicamente.
 
