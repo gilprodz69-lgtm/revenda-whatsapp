@@ -42,7 +42,7 @@ Docker pode contornar regras UFW para portas publicadas; esta composição publi
 
 Referências primárias usadas:
 
-- [Código oficial Evolution 2.3.7](https://github.com/evolution-foundation/evolution-api/tree/2.3.7), especialmente rotas `instance.router.ts`, `sendMessage.router.ts`, DTOs e migrations.
+- [Código oficial Evolution 2.4.0-rc2](https://github.com/evolution-foundation/evolution-api/tree/2.4.0-rc2), especialmente rotas `instance.router.ts`, `sendMessage.router.ts`, DTOs, migrations e ativação em `src/licensing`.
 - [Expay Brasil — documentação atual](https://expaybrasil.com/docs) e [OpenAPI](https://expaybrasil.com/docs/openapi.json).
 - [Mercado Pago Pix via Payments](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-payments/integration-configuration/integrate-pix).
 - [Mercado Pago — autenticação de webhooks](https://www.mercadopago.com.br/developers/en/docs/links-and-debts/additional-content/your-integrations/notifications/webhooks).

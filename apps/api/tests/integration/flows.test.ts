@@ -400,6 +400,28 @@ describe('Catálogo, webhooks e fluxo completo', () => {
     expect(text).toHaveBeenCalledTimes(2);
     expect(rich).toHaveBeenCalledTimes(2);
   });
+  it('preserva a outbox enquanto a ativação da Evolution está pendente e envia após liberar', async () => {
+    const row = await db.message.create({
+      data: {
+        key: 'activation-pending',
+        instanceName: 'store',
+        customerId,
+        direction: 'OUT',
+        encryptedText: encrypt('Mensagem pendente'),
+      },
+    });
+    const send = vi
+      .spyOn(evolution, 'sendText')
+      .mockRejectedValueOnce(
+        new AppError('EVOLUTION_ACTIVATION_REQUIRED', 'Ativação pendente', 503),
+      );
+    await dispatchMessage(row.id);
+    expect((await db.message.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('PENDING');
+    send.mockResolvedValueOnce({ key: { id: 'after-activation' } });
+    await dispatchMessage(row.id);
+    expect((await db.message.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('SENT');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
   it('pagina categorias sem ultrapassar dez opções na lista e mantém o modo texto disponível', async () => {
     for (let i = 0; i < 10; i++)
       await db.provider.create({
@@ -927,6 +949,47 @@ describe('Autenticação, filas e proteção de webhooks financeiros', () => {
       origin: 'http://localhost:5173',
       'x-csrf-token': login.json().csrf,
     };
+    const licenseStatus = vi
+      .spyOn(evolution, 'licenseStatus')
+      .mockResolvedValue({ status: 'inactive', instanceId: 'test-instance' });
+    const register = vi
+      .spyOn(evolution, 'licenseRegister')
+      .mockResolvedValue({
+        status: 'pending',
+        registerUrl: 'https://license.evolutionfoundation.com.br/register',
+      });
+    const activate = vi.spyOn(evolution, 'licenseActivate').mockResolvedValue({ status: 'active' });
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/whatsapp/license', headers })).json().status,
+    ).toBe('inactive');
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/whatsapp/license/register',
+          headers,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/whatsapp/license/activate',
+          headers,
+          payload: { code: 'TEST_ONLY_CODE' },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(licenseStatus).toHaveBeenCalledTimes(1);
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(activate).toHaveBeenCalledWith('TEST_ONLY_CODE');
+    expect(
+      JSON.stringify(
+        await db.auditLog.findMany({ where: { action: { startsWith: 'evolution.activation' } } }),
+      ),
+    ).not.toContain('TEST_ONLY_CODE');
     const initial = await app.inject({ method: 'GET', url: '/api/settings', headers });
     expect(initial.json().values['bot.activationKeywords']).toContain('legado');
     expect(
@@ -1032,6 +1095,20 @@ describe('Autenticação, filas e proteção de webhooks financeiros', () => {
     expect(login.statusCode).toBe(200);
     const csrf = login.json().csrf;
     const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/whatsapp/license', headers: { cookie } }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/whatsapp/license/activate',
+          headers: { cookie, origin: 'http://localhost:5173', 'x-csrf-token': csrf },
+          payload: { code: 'TEST_ONLY_CODE' },
+        })
+      ).statusCode,
+    ).toBe(403);
     const connect = vi.spyOn(evolution, 'connect').mockResolvedValue({ pairingCode: '1234-5678' });
     expect(
       (

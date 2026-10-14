@@ -90,6 +90,14 @@ export async function dispatchMessage(id: string) {
       });
     });
   } catch (e) {
+    if (e instanceof AppError && e.code === 'EVOLUTION_ACTIVATION_REQUIRED') {
+      // Licensing gate rejects before send. Keep the outbox for recovery after activation.
+      await transaction(async (tx) => {
+        await tx.message.update({ where: { id }, data: { status: 'PENDING' } });
+        await tx.delivery.updateMany({ where: { messageId: id }, data: { status: 'PENDING' } });
+      });
+      return;
+    }
     await db.message.update({ where: { id }, data: { status: 'UNKNOWN' } });
     await db.delivery.updateMany({ where: { messageId: id }, data: { status: 'UNKNOWN' } });
     // Evolution has no documented send idempotency. Automatic retries would risk duplicate credentials.

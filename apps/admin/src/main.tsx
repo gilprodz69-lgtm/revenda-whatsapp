@@ -32,6 +32,7 @@ import './filters.css';
 import './theme.css';
 import './glow';
 import { EditorDialog, ProductFields } from './editor';
+import { EvolutionActivation, activationReturn } from './evolution-activation';
 const brl = (v: unknown) => `R$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const usd = (v: unknown) => `US$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const date = (v: unknown) => (v ? new Date(String(v)).toLocaleString('pt-BR') : '—');
@@ -169,7 +170,7 @@ function Login({ onLogin, onError }: { onLogin: (a: Row) => void; onError: (e: u
 function App() {
   const [admin, setAdmin] = useState<Row | null>(null),
     [booting, setBooting] = useState(true),
-    [page, setPage] = useState('dashboard'),
+    [page, setPage] = useState(activationReturn ? 'whatsapp' : 'dashboard'),
     [sidebar, setSidebar] = useState(false),
     [dark, setDark] = useState(localStorage.getItem('theme') !== 'light'),
     [data, setData] = useState<any>(null),
@@ -392,7 +393,7 @@ function App() {
         <Login
           onLogin={(a) => {
             setAdmin(a);
-            go('dashboard');
+            go(activationReturn ? 'whatsapp' : 'dashboard');
           }}
           onError={report}
         />
@@ -951,78 +952,81 @@ function App() {
                     </section>
                   )}
                   {page === 'whatsapp' && (
-                    <div className="instance-grid">
-                      {rows.length ? (
-                        rows.map((r) => (
-                          <section className="card instance" key={r.name}>
-                            <div className="card-title">
-                              <div className="instance-title">
-                                <div className="whatsapp-icon">
-                                  <MessageCircle size={25} />
+                    <>
+                      {canConfigure && <EvolutionActivation />}
+                      <div className="instance-grid">
+                        {rows.length ? (
+                          rows.map((r) => (
+                            <section className="card instance" key={r.name}>
+                              <div className="card-title">
+                                <div className="instance-title">
+                                  <div className="whatsapp-icon">
+                                    <MessageCircle size={25} />
+                                  </div>
+                                  <div>
+                                    <h2>{r.name}</h2>
+                                    <p>{r.phone ? `+${r.phone}` : 'Número ainda não conectado'}</p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <h2>{r.name}</h2>
-                                  <p>{r.phone ? `+${r.phone}` : 'Número ainda não conectado'}</p>
-                                </div>
+                                <Badge value={r.state} />
                               </div>
-                              <Badge value={r.state} />
-                            </div>
-                            <div className="service-row">
-                              <span>Atendimento automático</span>
-                              <b>{r.botEnabled ? 'Ativo' : 'Pausado'}</b>
-                            </div>
-                            <div className="instance-actions">
-                              {canOperate && (
-                                <>
-                                  <button className="primary" onClick={() => open('connect', r)}>
-                                    Conectar WhatsApp
-                                  </button>
-                                  <button
-                                    className="secondary"
-                                    onClick={() =>
-                                      void act(`/whatsapp/${r.name}/restart`).catch(() => {})
-                                    }
-                                  >
-                                    Reconectar
-                                  </button>
-                                  <button
-                                    className="secondary"
-                                    onClick={() =>
-                                      void act(`/whatsapp/${r.name}`, 'PATCH', {
-                                        botEnabled: !r.botEnabled,
-                                      }).catch(() => {})
-                                    }
-                                  >
-                                    {r.botEnabled ? 'Pausar bot' : 'Ativar bot'}
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                className="secondary"
-                                onClick={() =>
-                                  void api(`/whatsapp/${r.name}/state`)
-                                    .then(() => load())
-                                    .catch(report)
-                                }
-                              >
-                                Consultar conexão
+                              <div className="service-row">
+                                <span>Atendimento automático</span>
+                                <b>{r.botEnabled ? 'Ativo' : 'Pausado'}</b>
+                              </div>
+                              <div className="instance-actions">
+                                {canOperate && (
+                                  <>
+                                    <button className="primary" onClick={() => open('connect', r)}>
+                                      Conectar WhatsApp
+                                    </button>
+                                    <button
+                                      className="secondary"
+                                      onClick={() =>
+                                        void act(`/whatsapp/${r.name}/restart`).catch(() => {})
+                                      }
+                                    >
+                                      Reconectar
+                                    </button>
+                                    <button
+                                      className="secondary"
+                                      onClick={() =>
+                                        void act(`/whatsapp/${r.name}`, 'PATCH', {
+                                          botEnabled: !r.botEnabled,
+                                        }).catch(() => {})
+                                      }
+                                    >
+                                      {r.botEnabled ? 'Pausar bot' : 'Ativar bot'}
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  className="secondary"
+                                  onClick={() =>
+                                    void api(`/whatsapp/${r.name}/state`)
+                                      .then(() => load())
+                                      .catch(report)
+                                  }
+                                >
+                                  Consultar conexão
+                                </button>
+                              </div>
+                            </section>
+                          ))
+                        ) : (
+                          <section className="card empty">
+                            <MessageCircle size={36} />
+                            <h3>Conecte sua primeira instância</h3>
+                            <p>Crie a instância e escaneie o QR Code no WhatsApp.</p>
+                            {canConfigure && (
+                              <button className="primary" onClick={() => open('instance')}>
+                                Criar instância
                               </button>
-                            </div>
+                            )}
                           </section>
-                        ))
-                      ) : (
-                        <section className="card empty">
-                          <MessageCircle size={36} />
-                          <h3>Conecte sua primeira instância</h3>
-                          <p>Crie a instância e escaneie o QR Code no WhatsApp.</p>
-                          {canConfigure && (
-                            <button className="primary" onClick={() => open('instance')}>
-                              Criar instância
-                            </button>
-                          )}
-                        </section>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    </>
                   )}
                   {page === 'settings' && (
                     <div className="settings-grid">

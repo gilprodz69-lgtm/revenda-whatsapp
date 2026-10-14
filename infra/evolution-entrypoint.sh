@@ -8,7 +8,7 @@ umask 077
 log_file=$(mktemp)
 trap 'rm -f "$log_file"' EXIT
 if ! npm run db:deploy >"$log_file" 2>&1 || ! npm run db:generate >>"$log_file" 2>&1; then
-	echo 'Falha na migração da Evolution 2.3.7. Verifique banco e credenciais; detalhes omitidos para proteger segredos.' >&2
+	echo 'Falha na migração da Evolution. Verifique banco e credenciais; detalhes omitidos para proteger segredos.' >&2
 	exit 1
 fi
 rm -f "$log_file"

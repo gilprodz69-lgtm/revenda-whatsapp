@@ -631,6 +631,38 @@ tbody tr:last-child td {
 .pairing-code {
   color: var(--accent-text);
 }
+.activation-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--success);
+  font-size: 13px;
+}
+.activation-status svg {
+  flex-shrink: 0;
+}
+.activation-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.activation-form .field {
+  flex: 1;
+  min-width: min(240px, 100%);
+}
+.activation-card .instance-actions {
+  margin-top: 0;
+}
+.activation-card a.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.activation-error {
+  color: var(--danger);
+  margin-top: 16px;
+}
 .toast {
   border-radius: 14px;
   background: var(--surface-raised);

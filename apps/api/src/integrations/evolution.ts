@@ -21,6 +21,18 @@ export class EvolutionService {
       // Timeouts, 5xx and missing send IDs remain uncertain and must not be repeated.
       if (interactive && [400, 404, 405, 422].includes(response.status))
         throw new InteractiveRejected();
+      if (response.status === 503) {
+        const error = (await response
+          .clone()
+          .json()
+          .catch(() => ({}))) as { code?: string };
+        if (error.code === 'LICENSE_REQUIRED')
+          throw new AppError(
+            'EVOLUTION_ACTIVATION_REQUIRED',
+            'Ative a Evolution na aba WhatsApp do painel para liberar o atendimento.',
+            503,
+          );
+      }
       if (!response.ok)
         throw new AppError(
           'EVOLUTION_ERROR',
@@ -76,6 +88,37 @@ export class EvolutionService {
   }
   instances() {
     return this.call('/instance/fetchInstances');
+  }
+  async licenseStatus() {
+    const data = z
+      .object({ status: z.enum(['active', 'inactive']), instance_id: z.string().optional() })
+      .parse(await this.call('/license/status'));
+    return { status: data.status, instanceId: data.instance_id };
+  }
+  async licenseRegister() {
+    const result = await this.call(
+      `/license/register?redirect_uri=${encodeURIComponent(`${env.APP_ORIGIN}/evolution/activate`)}`,
+    );
+    if (result.status === 'active') return { status: 'active' as const };
+    const url = z.string().url().parse(result.register_url);
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password)
+      throw new AppError(
+        'INVALID_ACTIVATION_URL',
+        'A Evolution retornou um endereço de ativação inválido.',
+        502,
+      );
+    return { status: 'pending' as const, registerUrl: url };
+  }
+  async licenseActivate(code: string) {
+    const result = await this.call(`/license/activate?code=${encodeURIComponent(code)}`);
+    if (result.status !== 'active')
+      throw new AppError(
+        'EVOLUTION_ACTIVATION_FAILED',
+        'Não foi possível ativar a Evolution. Confira o código recebido no cadastro oficial.',
+        502,
+      );
+    return { status: 'active' as const };
   }
   sendText(instance: string, phone: string, text: string) {
     return this.call(`/message/sendText/${encodeURIComponent(instance)}`, 'POST', {

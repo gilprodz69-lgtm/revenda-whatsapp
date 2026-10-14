@@ -8,7 +8,7 @@ Eventos que esgotam retentativas entram em revisão, com código seguro e contad
 
 ```mermaid
 flowchart LR
-  Cliente[Cliente WhatsApp] <--> Evolution[Evolution 2.3.7]
+  Cliente[Cliente WhatsApp] <--> Evolution[Evolution 2.4.0-rc2]
   Evolution -->|Webhook privado autenticado| API[Fastify]
   Painel[React] -->|Cookie + CSRF + RBAC| API
   Gateway[Gateway Pix] -->|Notificação + consulta autenticada| API

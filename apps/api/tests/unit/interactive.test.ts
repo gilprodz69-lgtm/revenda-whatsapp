@@ -144,3 +144,55 @@ it('limita o número de opções conforme o formato', () => {
     }).success,
   ).toBe(false);
 });
+
+it('identifica o bloqueio de ativação antes de enviar e remove a chave do status público', async () => {
+  const service = new EvolutionService();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ code: 'LICENSE_REQUIRED' }), { status: 503 })),
+  );
+  await expect(service.sendText('store', '5511999999999', 'Olá')).rejects.toMatchObject({
+    code: 'EVOLUTION_ACTIVATION_REQUIRED',
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            status: 'inactive',
+            instance_id: 'test-instance',
+            api_key: 'MUST_NOT_LEAK',
+          }),
+        ),
+    ),
+  );
+  expect(await service.licenseStatus()).toEqual({
+    status: 'inactive',
+    instanceId: 'test-instance',
+  });
+});
+it('usa callback do próprio painel e rejeita endereço inseguro de cadastro', async () => {
+  const fetch = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          status: 'pending',
+          register_url: 'https://license.evolutionfoundation.com.br/register',
+        }),
+      ),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const service = new EvolutionService();
+  expect(await service.licenseRegister()).toEqual({
+    status: 'pending',
+    registerUrl: 'https://license.evolutionfoundation.com.br/register',
+  });
+  expect(decodeURIComponent(String(fetch.mock.calls[0]?.[0]))).toContain(
+    'redirect_uri=http://localhost:5173/evolution/activate',
+  );
+  vi.mocked(fetch).mockResolvedValueOnce(
+    new Response(JSON.stringify({ register_url: 'javascript:alert(1)' })),
+  );
+  await expect(service.licenseRegister()).rejects.toMatchObject({ code: 'INVALID_ACTIVATION_URL' });
+});

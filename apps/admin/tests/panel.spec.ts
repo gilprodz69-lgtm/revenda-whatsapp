@@ -62,7 +62,8 @@ async function mockApi(page: Page, loggedIn = true) {
         rates: [],
         templates: [{ key: 'summary', label: 'Resumo do pedido', text: 'Total: R$ {valor}' }],
       };
-    } else if (url.pathname === '/api/whatsapp') body = [];
+    } else if (url.pathname === '/api/whatsapp/license') body = { status: 'active' };
+    else if (url.pathname === '/api/whatsapp') body = [];
     else body = { data: [], total: 0 };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -249,4 +250,47 @@ test('conecta WhatsApp com uma mutação protegida e mostra o pareamento retorna
   await page.getByRole('button', { name: 'Gerar QR Code / pareamento' }).click();
   expect((await request).method()).toBe('POST');
   await expect(page.getByText('1234-5678')).toBeVisible();
+});
+
+test('ativa Evolution pelo painel sem expor a chave e limpa o código do retorno', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let active = false;
+  await page.route('**/api/whatsapp/license', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ status: active ? 'active' : 'inactive' }),
+    }),
+  );
+  await page.route('**/api/whatsapp/license/register', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'pending',
+        registerUrl: 'https://license.evolutionfoundation.com.br/register?token=TEST_ONLY',
+      }),
+    }),
+  );
+  await page.route('**/api/whatsapp/license/activate', async (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().postDataJSON()).toEqual({ code: 'TEST_ONLY_CODE' });
+    active = true;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'active' }),
+    });
+  });
+  await page.goto('/evolution/activate?code=TEST_ONLY_CODE');
+  await expect(page).toHaveURL('http://127.0.0.1:5173/');
+  await expect(page.getByLabel('Código de ativação da Evolution')).toHaveValue('TEST_ONLY_CODE');
+  await page.getByRole('button', { name: 'Iniciar ativação', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Abrir cadastro oficial' })).toHaveAttribute(
+    'href',
+    /license.evolutionfoundation.com.br/,
+  );
+  await page.getByRole('button', { name: 'Confirmar ativação', exact: true }).click();
+  await expect(
+    page.getByText('Evolution ativada. Você já pode conectar o WhatsApp.'),
+  ).toBeVisible();
 });

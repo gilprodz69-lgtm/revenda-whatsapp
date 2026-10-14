@@ -31,7 +31,15 @@ Em **Configurações → Formato do atendimento no WhatsApp**, escolha **Botões
 
 As seleções interativas têm identificadores vinculados à etapa atual; cliques de menus anteriores ou sessões expiradas são ignorados. A mensagem interativa é armazenada cifrada junto da resposta na outbox. Timeout, erro 5xx ou ausência do ID de envio deixam resultado desconhecido sem repetir automaticamente. Rejeições HTTP 400/404/405/422 permitem enviar a alternativa em texto.
 
-O contrato segue [DTOs da Evolution 2.3.7](https://github.com/evolution-foundation/evolution-api/blob/2.3.7/src/api/dto/sendMessage.dto.ts) e seus endpoints `sendButtons`/`sendList`. Existem [relatos de falhas de botões/listas nessa versão](https://github.com/evolution-foundation/evolution-api/issues/2390). A aceitação HTTP não comprova que o WhatsApp exibiu o componente no aparelho. Confira usando outro número; se necessário, selecione Menu em texto. Esta atualização mantém a imagem estável da Evolution; não troca automaticamente para uma versão candidata com requisitos novos de ativação.
+O contrato segue os endpoints `sendButtons`/`sendList` da [Evolution 2.4.0-rc2](https://github.com/evolution-foundation/evolution-api/releases/tag/2.4.0-rc2), que inclui as correções de mensagens interativas introduzidas na rc1. A imagem oficial está fixada por digest no Compose. A aceitação HTTP não comprova que o WhatsApp exibiu o componente no aparelho. Confira usando outro número; se necessário, selecione Menu em texto.
+
+### Ativação da Evolution 2.4.0-rc2
+
+Esta versão candidata foi selecionada explicitamente pelo operador. Antes de conectar/enviar, abra **WhatsApp → Iniciar ativação → Abrir cadastro oficial**, conclua o cadastro da Evolution e confirme o código recebido no painel. O retorno do cadastro para `/evolution/activate?code=...` preenche o código e o remove da URL; o proprietário precisa confirmar o envio, com sessão e CSRF válidos. Também é possível colar o código manualmente. O botão Consultar ativação atualiza o estado após concluir o processo.
+
+O painel acessa os endpoints internos oficiais `/license/status`, `/license/register` e `/license/activate`; não expõe o manager nem a porta da Evolution. Não altera a chave `EVOLUTION_API_KEY` existente. A licença e o identificador da instalação são persistidos pela Evolution no próprio banco, incluído no backup. O health check distingue serviço iniciado de ativação pendente. Quando recebe `LICENSE_REQUIRED`, a outbox permanece PENDING para recuperação após ativar. Timeout genérico continua UNKNOWN.
+
+A nova Evolution contata o serviço oficial de licenciamento no boot e durante a operação. O painel não cadastra automaticamente o e-mail do administrador nesse serviço. O usuário conclui o cadastro oficial. As notas da rc2 informam um caminho opcional `EVOLUTION_OPERATOR_EMAIL` para e-mails já registrados; esta aplicação não o configura automaticamente. A migração da 2.3.7 aplica as migrations oficiais, mantendo banco e volume `evolution_instances`.
 
 ### Aparência do painel
 

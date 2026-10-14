@@ -42,7 +42,7 @@ Após propagar o DNS, verifique:
 sudo bash /opt/revenda-whatsapp/scripts/healthcheck.sh
 ```
 
-Abra `https://SEU_DOMINIO` e entre com o e-mail/senha definidos. Confira as etapas Partner, cotação, produtos, Pix e WhatsApp no [README](../README.md).
+Abra `https://SEU_DOMINIO` e entre com o e-mail/senha definidos. A Evolution 2.4.0-rc2 exige ativação: acesse **WhatsApp → Iniciar ativação → Abrir cadastro oficial**, conclua o cadastro externo e confirme o código no painel. O retorno `/evolution/activate?code=...` abre essa mesma aba e remove o código da URL; você confirma a ativação como proprietário. A chave da aplicação continua privada e a porta da Evolution não é exposta. Confira as etapas Partner, cotação, produtos e Pix no [README](../README.md).
 
 ## Repetir, atualizar e diagnosticar
 

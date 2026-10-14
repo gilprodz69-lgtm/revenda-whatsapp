@@ -600,6 +600,24 @@ export async function buildApp() {
         return { data, total, page: q.page };
       });
       admin.get('/whatsapp', async () => db.whatsappInstance.findMany());
+      admin.get('/whatsapp/license', async (request) => {
+        requirePermission(request, 'configure');
+        return evolution.licenseStatus();
+      });
+      admin.post('/whatsapp/license/register', async (request) => {
+        requirePermission(request, 'configure');
+        const result = await evolution.licenseRegister();
+        await audit(request.admin.id, 'evolution.activation.register', 'evolution');
+        return result;
+      });
+      admin.post('/whatsapp/license/activate', async (request) => {
+        requirePermission(request, 'configure');
+        const { code } = z.object({ code: z.string().trim().min(6).max(2000) }).parse(request.body);
+        const result = await evolution.licenseActivate(code);
+        await audit(request.admin.id, 'evolution.activation.complete', 'evolution');
+        await notifyOutgoing();
+        return result;
+      });
       admin.post('/whatsapp', async (request) => {
         requirePermission(request, 'configure');
         const body = nameSchema
