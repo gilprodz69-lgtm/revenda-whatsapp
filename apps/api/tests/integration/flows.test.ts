@@ -411,6 +411,7 @@ describe('Catálogo, webhooks e fluxo completo', () => {
           products: {
             create: {
               slug: `extra-product-${i}`,
+              syncedAt: new Date(),
               externalId: 100 + i,
               name: `Produto ${i}`,
               costUsd: '1',
