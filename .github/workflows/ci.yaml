@@ -4,6 +4,7 @@ permissions: { contents: read }
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16.10-bookworm

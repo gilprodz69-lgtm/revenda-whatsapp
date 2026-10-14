@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import argon2 from 'argon2';
-import { db } from './core/db.js';
+import { PrismaClient } from '@prisma/client';
+import './config.js';
+// This one-shot process needs only PostgreSQL; do not open the application's Redis connection.
+const db = new PrismaClient({ log: [] });
 const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
 const passwordFile = process.env.ADMIN_PASSWORD_FILE;
 if (!email || !passwordFile) throw new Error('Informe ADMIN_EMAIL e ADMIN_PASSWORD_FILE.');

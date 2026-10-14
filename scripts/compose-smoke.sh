@@ -13,7 +13,7 @@ cd "$ROOT_DIR"
 	exit 1
 }
 temp_dir=$(mktemp -d)
-dc() { docker compose --project-name "revenda_smoke_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT:-1}" --env-file "$temp_dir/env" -f "$ROOT_DIR/compose.yaml" "$@"; }
+dc() { timeout 480 docker compose --project-name "revenda_smoke_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT:-1}" --env-file "$temp_dir/env" -f "$ROOT_DIR/compose.yaml" "$@"; }
 cleanup() {
 	local result=$?
 	if ((result != 0)); then
@@ -63,4 +63,5 @@ dc exec -T api node -e 'const r=await fetch("http://127.0.0.1:3000/health/ready"
 dc exec -T worker node -e 'import("./dist/core/db.js").then(async({redis})=>{const v=await redis.get("worker:heartbeat");await redis.quit();process.exit(v?0:1)})'
 dc exec -T admin wget -q -O /dev/null http://127.0.0.1:8080/health
 dc exec -T evolution node -e 'const r=await fetch("http://127.0.0.1:8080");if(!r.ok)process.exit(1)' --input-type=module
+dc run --rm --no-deps proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 echo 'Compose: PostgreSQL, Redis, migrations, administrador, API, worker, painel e Evolution iniciados com saúde.'
