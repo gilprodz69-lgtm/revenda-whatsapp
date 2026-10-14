@@ -27,7 +27,7 @@ Em **Configurações → Palavras-chave para iniciar o bot**, cadastre palavras 
 
 O bot atende apenas conversas privadas: grupos são ignorados tanto no webhook quanto no worker, inclusive quando existe um telefone privado alternativo no evento. Isso também se aplica a eventos antigos ainda pendentes.
 
-Em **Configurações → Formato do atendimento no WhatsApp**, escolha **Botões e listas** (padrão) ou **Menu em texto**. O menu principal oferece Comprar serviços, Meu saldo e Suporte. Pelo saldo, o cliente acessa Adicionar saldo, Meus pedidos e Minha conta. Categorias e produtos usam listas paginadas de até dez opções; quantidade e confirmação usam botões. Valores diferentes, e-mail e CPF continuam aceitando texto. Os menus numéricos permanecem disponíveis como alternativa.
+Em **Configurações → Formato do atendimento no WhatsApp**, escolha **Menu em lista e botões de confirmação** (padrão) ou **Menu em texto**. A mensagem de boas-vindas mostra um único botão nativo **Menu**, que abre uma lista com Comprar serviços, Meu saldo, Adicionar saldo, Meus pedidos, Suporte e Minha conta. Carteira, categorias e produtos também usam listas; categorias e produtos são paginados em até dez opções. Quantidade e confirmação usam botões. Valores diferentes, e-mail e CPF continuam aceitando texto. Os menus numéricos permanecem disponíveis como alternativa.
 
 As seleções interativas têm identificadores vinculados à etapa atual; cliques de menus anteriores ou sessões expiradas são ignorados. A mensagem interativa é armazenada cifrada junto da resposta na outbox. Timeout, erro 5xx ou ausência do ID de envio deixam resultado desconhecido sem repetir automaticamente. Rejeições HTTP 400/404/405/422 permitem enviar a alternativa em texto.
 

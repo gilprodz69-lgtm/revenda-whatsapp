@@ -299,7 +299,7 @@ describe('Ledger transacional, pedidos e recuperação', () => {
 describe('Catálogo, webhooks e fluxo completo', () => {
   it('navega por botões e listas, ignora menu antigo e confirma a compra uma vez', async () => {
     await credit();
-    async function receive(text: string, native = false) {
+    async function receive(text: string, native = false, list = false) {
       const event = await db.webhookEvent.create({
         data: {
           key: randomUUID(),
@@ -309,13 +309,15 @@ describe('Catálogo, webhooks e fluxo completo', () => {
               instance: 'store',
               data: {
                 key: { id: randomUUID(), remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
-                message: native
-                  ? {
-                      interactiveResponseMessage: {
-                        nativeFlowResponseMessage: { paramsJson: JSON.stringify({ id: text }) },
-                      },
-                    }
-                  : { conversation: text },
+                message: list
+                  ? { listResponseMessage: { singleSelectReply: { selectedRowId: text } } }
+                  : native
+                    ? {
+                        interactiveResponseMessage: {
+                          nativeFlowResponseMessage: { paramsJson: JSON.stringify({ id: text }) },
+                        },
+                      }
+                    : { conversation: text },
               },
             }),
           ),
@@ -326,24 +328,29 @@ describe('Catálogo, webhooks e fluxo completo', () => {
       return db.message.findUnique({ where: { key: `reply-${event.key}` } });
     }
     const menu = JSON.parse(decrypt((await receive('oi'))!.encryptedInteractive!)) as Interactive;
-    expect(menu.type).toBe('buttons');
+    expect(menu.type).toBe('list');
+    if (menu.type !== 'list') throw Error('Expected native list menu');
+    expect(menu.buttonText).toBe('Menu');
     const options = (m: Interactive) => (m.type === 'buttons' ? m.buttons : m.rows);
     expect(options(menu).map((o) => o.title)).toEqual([
       '🛍️ Comprar serviços',
       '💰 Meu saldo',
+      '💳 Adicionar saldo',
+      '📦 Meus pedidos',
       '🎧 Suporte',
+      '👤 Minha conta',
     ]);
     expect(menu.description).not.toContain('1 - Ver produtos');
     const categories = JSON.parse(
-      decrypt((await receive(options(menu)[0]!.id, true))!.encryptedInteractive!),
+      decrypt((await receive(options(menu)[0]!.id, false, true))!.encryptedInteractive!),
     ) as Interactive;
     expect(categories.type).toBe('list');
     const products = JSON.parse(
-      decrypt((await receive(options(categories)[0]!.id, true))!.encryptedInteractive!),
+      decrypt((await receive(options(categories)[0]!.id, false, true))!.encryptedInteractive!),
     ) as Interactive;
     expect(products.type).toBe('list');
     const quantity = JSON.parse(
-      decrypt((await receive(options(products)[0]!.id, true))!.encryptedInteractive!),
+      decrypt((await receive(options(products)[0]!.id, false, true))!.encryptedInteractive!),
     ) as Interactive;
     const summary = JSON.parse(
       decrypt((await receive(options(quantity)[0]!.id, true))!.encryptedInteractive!),

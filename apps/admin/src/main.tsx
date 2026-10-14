@@ -1089,14 +1089,16 @@ function App() {
                               name="messageStyle"
                               defaultValue={data.values['bot.messageStyle'] ?? 'interactive'}
                             >
-                              <option value="interactive">Botões e listas</option>
+                              <option value="interactive">
+                                Menu em lista e botões de confirmação
+                              </option>
                               <option value="text">Menu em texto</option>
                             </select>
                           </Field>
                           <small>
-                            Botões para ações rápidas e listas para categorias e produtos. A
-                            exibição depende da Evolution e do WhatsApp; se a API rejeitar o
-                            formato, o atendimento continua em texto.
+                            Menu principal, carteira, categorias e produtos em listas. Botões para
+                            confirmar a compra. A exibição depende da Evolution e do WhatsApp; se a
+                            API rejeitar o formato, o atendimento continua em texto.
                           </small>
                           <small className="muted">
                             Separe palavras ou frases por vírgula. O bot inicia somente no privado

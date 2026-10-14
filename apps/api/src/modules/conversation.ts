@@ -174,11 +174,35 @@ export async function processIncoming(eventId: string) {
       store = await setting('store.name', 'Nossa loja');
     const mainMenu = async () => {
       const text = await messageTemplate('welcome', { nome: customer.name, loja: store });
-      choices('buttons', text, [
-        { value: '1', title: '🛍️ Comprar serviços' },
-        { value: '2', title: '💰 Meu saldo' },
-        { value: '5', title: '🎧 Suporte' },
-      ]);
+      choices(
+        'list',
+        text,
+        [
+          {
+            value: '1',
+            title: '🛍️ Comprar serviços',
+            description: 'Explore categorias e produtos disponíveis',
+          },
+          {
+            value: '2',
+            title: '💰 Meu saldo',
+            description: 'Consulte o saldo e suas movimentações',
+          },
+          {
+            value: '3',
+            title: '💳 Adicionar saldo',
+            description: 'Adicione créditos à carteira por Pix',
+          },
+          {
+            value: '4',
+            title: '📦 Meus pedidos',
+            description: 'Acompanhe suas compras e entregas',
+          },
+          { value: '5', title: '🎧 Suporte', description: 'Converse com a equipe de atendimento' },
+          { value: '6', title: '👤 Minha conta', description: 'Consulte os dados da sua conta' },
+        ],
+        'Menu',
+      );
       return text;
     };
     const startHuman = async () => {
@@ -303,11 +327,17 @@ export async function processIncoming(eventId: string) {
             include: { entries: { orderBy: { createdAt: 'desc' }, take: 5 } },
           });
           response = `Saldo disponível: R$ ${wallet.available.toFixed(2)}\nSaldo reservado: R$ ${wallet.reserved.toFixed(2)}\n\nÚltimas movimentações:\n${wallet.entries.map((e) => `${e.kind}: R$ ${e.availableDelta.toFixed(2)}`).join('\n')}\n\n3 - Adicionar saldo\n0 - Menu`;
-          choices('buttons', response, [
-            { value: '3', title: '💳 Adicionar saldo' },
-            { value: '4', title: '📦 Meus pedidos' },
-            { value: '6', title: '👤 Minha conta' },
-          ]);
+          choices(
+            'list',
+            response,
+            [
+              { value: '3', title: '💳 Adicionar saldo' },
+              { value: '4', title: '📦 Meus pedidos' },
+              { value: '6', title: '👤 Minha conta' },
+              { value: '0', title: 'Menu principal' },
+            ],
+            'Menu da carteira',
+          );
         } else if (['3', 'pix', 'deposito', 'adicionar saldo'].includes(input)) {
           state = { step: 'DEPOSIT_AMOUNT' };
           response =
@@ -452,11 +482,16 @@ export async function processIncoming(eventId: string) {
       !humanUntil &&
       state.step === 'MENU'
     )
-      choices('buttons', response, [
-        { value: '0', title: 'Menu principal' },
-        { value: '3', title: 'Adicionar saldo' },
-        { value: '5', title: 'Suporte' },
-      ]);
+      choices(
+        'list',
+        response,
+        [
+          { value: '0', title: 'Menu principal' },
+          { value: '3', title: 'Adicionar saldo' },
+          { value: '5', title: 'Suporte' },
+        ],
+        'Menu',
+      );
     if (!interactive) delete state.interaction;
     await transaction(async (tx) => {
       if ((await tx.webhookEvent.findUniqueOrThrow({ where: { id: eventId } })).processedAt) return;

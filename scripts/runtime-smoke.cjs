@@ -78,7 +78,7 @@ const env = {
   servers.push(
     await fixture((req, res) => {
       if (/\/message\/send(?:Text|Buttons|List)\//.test(req.url)) sends++;
-      if (req.url.includes('/message/sendButtons/')) interactiveSends++;
+      if (req.url.includes('/message/sendList/')) interactiveSends++;
       send(
         res,
         req.url.includes('connectionState')
@@ -161,7 +161,7 @@ const env = {
     timings.push(elapsed);
   }
   if (sends !== 2) throw Error('Duplicate or missing WhatsApp reply: ' + sends);
-  if (interactiveSends !== 2) throw Error('Default menus did not use interactive buttons');
+  if (interactiveSends !== 2) throw Error('Default menus did not use native interactive lists');
   if (!(await redis.get('worker:heartbeat'))) throw Error('Heartbeat do worker ausente.');
   console.log(
     'SMOKE PASS: API + worker, recovery scan disabled, replies (ms): ' +
