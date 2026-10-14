@@ -952,12 +952,10 @@ describe('Autenticação, filas e proteção de webhooks financeiros', () => {
     const licenseStatus = vi
       .spyOn(evolution, 'licenseStatus')
       .mockResolvedValue({ status: 'inactive', instanceId: 'test-instance' });
-    const register = vi
-      .spyOn(evolution, 'licenseRegister')
-      .mockResolvedValue({
-        status: 'pending',
-        registerUrl: 'https://license.evolutionfoundation.com.br/register',
-      });
+    const register = vi.spyOn(evolution, 'licenseRegister').mockResolvedValue({
+      status: 'pending',
+      registerUrl: 'https://license.evolutionfoundation.com.br/register',
+    });
     const activate = vi.spyOn(evolution, 'licenseActivate').mockResolvedValue({ status: 'active' });
     expect(
       (await app.inject({ method: 'GET', url: '/api/whatsapp/license', headers })).json().status,

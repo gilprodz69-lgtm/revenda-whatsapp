@@ -258,13 +258,11 @@ export async function processIncoming(eventId: string) {
         'list',
         await messageTemplate('products'),
         [
-          ...products
-            .slice(0, 8)
-            .map((p, i) => ({
-              value: String(i + 1),
-              title: p.name,
-              description: `Estoque: ${p.stock} · Máximo: ${p.maxQuantity}`,
-            })),
+          ...products.slice(0, 8).map((p, i) => ({
+            value: String(i + 1),
+            title: p.name,
+            description: `Estoque: ${p.stock} · Máximo: ${p.maxQuantity}`,
+          })),
           ...(products.length > 8
             ? [{ value: '9', title: 'Mais produtos' }]
             : [{ value: '0', title: 'Menu principal' }]),

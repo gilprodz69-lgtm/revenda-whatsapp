@@ -1,5 +1,15 @@
 # Registro de validação
 
+## Versão 1.0.2
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38653318295), commit de código `fbb950e`, foi aprovada em 14/10/2026: 78 testes unitários, 36 de integração e 18 de interface desktop/celular (132 no total), TypeScript, build, auditoria npm, scripts, updater, imagens Docker e inicialização dos serviços. O teste de processos reais enviou duas respostas interativas em 80 ms e 67 ms, sem varredura periódica nem duplicação; a Evolution de envio foi um servidor HTTP simulado.
+
+O teste Docker iniciou a imagem oficial 2.3.7, gravou um registro no banco `evolution` e um arquivo no volume das instâncias, trocou para a imagem oficial **2.4.0-rc2** fixada por digest e confirmou ambos após as migrations e a inicialização com saúde. Também verificou `/license/status` e o bloqueio `LICENSE_REQUIRED` antes da ativação. São dados de teste que comprovam reutilização do banco/volume; o cenário não pareou uma conta WhatsApp real nem realizou cadastro/ativação real.
+
+Os testes novos cobrem botões/listas/native flow, paginação, rejeição de menus antigos, confirmação única da compra, alternativa em texto, timeout sem repetição e preservação da outbox durante ativação pendente. O fluxo de ativação do painel foi verificado com endpoints simulados, autorização de proprietário, CSRF, auditoria sem código secreto e remoção do código da URL. No admin, os testes verificaram persistência do tema, seções dos modais, conservação dos valores, validação de campos em seções ocultas, foco contido e Escape. As capturas de desktop/celular em tema claro/escuro foram inspecionadas localmente.
+
+Pendente na instalação do operador: aplicar a release, concluir o cadastro oficial da Evolution e testar a renderização dos botões/listas em outro aparelho/número. A rc2 é uma versão candidata escolhida explicitamente pelo operador. Nenhuma VPS, conta real de cliente ou pagamento real foi acessado nessa atualização.
+
 ## Versão 1.0.1
 
 A [execução de 14/10/2026 no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38649960736), commit de código `6418ac5`, passou: 63 testes unitários, 32 de integração e 12 de interface desktop/celular (107 no total), TypeScript, build, auditoria npm, scripts Linux, imagens Docker e inicialização com saúde de PostgreSQL, Redis, migrations, administrador, API, worker, painel e Evolution. A configuração Caddy também foi validada.
