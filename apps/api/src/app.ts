@@ -681,13 +681,14 @@ export async function buildApp() {
           take: 100,
         });
         await audit(request.admin.id, 'messages.read', id);
-        return rows.map(({ encryptedText, encryptedMedia, ...row }) => ({
+        return rows.map(({ encryptedText, encryptedMedia, encryptedInteractive, ...row }) => ({
           ...row,
           text:
             row.key.startsWith('delivery-') || row.key.startsWith('resend-')
               ? '[Entrega protegida: use o reenvio auditado]'
               : decrypt(encryptedText),
           hasMedia: !!encryptedMedia,
+          hasInteractive: !!encryptedInteractive,
         }));
       });
       admin.post('/messages/:id', async (request) => {
