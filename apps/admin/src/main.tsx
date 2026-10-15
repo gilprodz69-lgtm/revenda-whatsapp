@@ -1915,6 +1915,7 @@ function App() {
                     {detail.source === 'SMM' && (
                       <section className="permission-box stack">
                         <h3>Acompanhamento SMM</h3>
+                        <p>Provedor: {detail.smmProvider?.name ?? detail.smmProviderId}</p>
                         <p>
                           Pedido no provedor: {detail.smmOrderId ?? 'Não identificado'} ·{' '}
                           {detail.smmState ?? 'Aguardando envio'}

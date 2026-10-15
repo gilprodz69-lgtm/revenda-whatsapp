@@ -399,6 +399,7 @@ test('libera reserva SMM incerta somente após justificativa e conferência expl
   await navigate(page, 'Pedidos');
   await page.getByRole('button', { name: 'Detalhes', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Detalhes do pedido' });
+  await expect(dialog).toContainText('Provedor: Machine SMM');
   await dialog
     .getByLabel('Justificativa da liberação (mínimo 10 caracteres)', { exact: true })
     .fill('Conferência no painel: pedido ausente.');

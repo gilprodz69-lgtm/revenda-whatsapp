@@ -16,6 +16,7 @@ flowchart LR
   Worker[Worker BullMQ] <--> DB
   Worker <--> Redis[(Redis)]
   Worker -->|ID e corpo persistidos| Partner[Partner API]
+  Worker -->|add único e consulta de status| SMM[Provedores SMM API v2]
   Worker -->|Outbox| Evolution
 ```
 
@@ -26,6 +27,10 @@ O proxy publica somente o painel, `/api`, health checks e webhook Pix. O webhook
 Valores monetários usam PostgreSQL `numeric`, Prisma Decimal e decimal.js. Preço é custo USD × cotação × (1 + markup/100) + margem fixa, salvo preço manual. Promoção válida pode reduzir o preço. Desconto local por volume é aplicado depois. O preço unitário é arredondado **para cima** no passo configurado, depois formatado em centavos (`ROUND_HALF_UP`). Custo de volume upstream considera o melhor preço entre `yourPrice` e faixas aplicáveis. Não há inferência de outros descontos não documentados.
 
 Cada pedido persiste cotação, referência à taxa, custo estimado, preço unitário, quantidade e corpo externo. Quando confirmado, o custo realmente cobrado em USD determina o lucro bruto realizado. Esse lucro não desconta taxas Pix, impostos, despesas operacionais ou spread de financiamento do fornecedor; não representa lucro líquido. Estorno de pedido concluído credita a carteira e registra o custo externo como perda bruta.
+
+Para SMM, o preço é por 1.000 unidades ou por pacote, multiplicado pela quantidade antes do arredondamento do total. Custos em BRL não possuem referência de cotação USD; custos USD congelam a taxa usada. O destino e os campos específicos ficam criptografados, e a impressão digital dos dados protege a confirmação idempotente. Pedidos/serviços possuem identificação por provedor, separada dos códigos Partner. Conclusões parciais conciliam a reserva com captura e devolução proporcionais, sem crédito duplicado. O [guia SMM](SMM.md) descreve as regras e os tipos compatíveis.
+
+Como o contrato SMM API v2 não oferece idempotência de criação, uma tentativa `add` é registrada sob bloqueio antes do envio. Resposta perdida leva a revisão, conservando a reserva sem repetir a compra. O proprietário vincula um pedido externo existente após conferir os dados, ou confirma a ausência para liberar a reserva; ambas as ações são auditadas. Categorias da loja são independentes do provedor e do tipo de entrega. A migration 006 mantém as categorias equivalentes dos produtos Partner existentes.
 
 Ledger é append-only. Constraints recusam saldos negativos e triggers proíbem alteração/exclusão de lançamentos e auditoria. Uma transação serializável com `FOR UPDATE` altera carteira e registra o lançamento. Chaves únicas evitam depósito/reserva/captura/estorno duplicado. Conflitos serializáveis são repetidos com backoff limitado.
 

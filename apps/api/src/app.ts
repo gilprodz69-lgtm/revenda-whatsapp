@@ -598,6 +598,7 @@ export async function buildApp() {
             customer: true,
             items: true,
             exchangeRate: true,
+            smmProvider: { select: { id: true, name: true, currency: true } },
             attempts: { orderBy: { createdAt: 'desc' } },
             deliveries: {
               select: {

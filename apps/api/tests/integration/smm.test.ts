@@ -373,6 +373,12 @@ it('exige conferência, permissão financeira e CSRF para liberar criação ince
   const url = `/api/orders/${first.id}/smm/release`;
   const payload = { reason: 'Conferido no painel: pedido não criado.', confirmed: true };
   try {
+    const detail = await app.inject({ method: 'GET', url: `/api/orders/${first.id}`, headers });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().smmProvider.id).toBe(providerId);
+    expect(detail.json().smmProvider.currency).toBe('USD');
+    expect(detail.body).not.toContain('encryptedApiKey');
+    expect(detail.body).not.toContain('TEST-SMM-KEY');
     expect(
       (await app.inject({ method: 'POST', url, headers: { cookie: headers.cookie }, payload }))
         .statusCode,

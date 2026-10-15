@@ -1,5 +1,7 @@
 # Operação e troubleshooting
 
+Para configurar provedores SMM API v2, importar serviços avulsos, organizar categorias e resolver pedidos em revisão, consulte o [guia SMM](SMM.md). A importação Partner descrita abaixo continua disponível no botão de Produtos.
+
 ## Importar serviços
 
 Em **Produtos → Editar → Apresentação**, defina o **Nome na loja** e a **Descrição no WhatsApp**. A descrição é escrita pelo lojista (até 2.500 caracteres); o bot não publica automaticamente a descrição do fornecedor. Nome vazio usa o nome do fornecedor, e descrição vazia não adiciona texto descritivo. A sincronização mantém os textos personalizados e atualiza somente os dados do fornecedor. Detalhes, resumo de compra e novos pedidos usam o nome da loja; pedidos anteriores conservam seu próprio registro.
