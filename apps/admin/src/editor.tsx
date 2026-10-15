@@ -11,6 +11,7 @@ export function EditorDialog({
   busy,
   error,
   wide,
+  footer,
 }: {
   title: string;
   description: string;
@@ -20,6 +21,7 @@ export function EditorDialog({
   busy: boolean;
   error?: string;
   wide?: boolean;
+  footer?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const close = useRef(onClose);
@@ -104,6 +106,7 @@ export function EditorDialog({
           </div>
         )}
         <div className="modal-content">{children}</div>
+        {footer}
       </div>
     </dialog>
   );

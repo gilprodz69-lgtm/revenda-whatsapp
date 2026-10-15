@@ -10,7 +10,9 @@ Chaves Partner/Expay configuradas no painel substituem os valores de ambiente e 
 
 ## Partner API
 
-Base: `https://ggsoma.store/api/partner/v1`, header Bearer somente nas rotas protegidas. `/health` é público. O serviço implementa balance, providers, products, detalhe por slug/id, create order, list/detail orders e usage. Produtos são identificados por slug; sincronização faz upsert e preserva regras locais. Ausentes ficam indisponíveis sem remover histórico.
+Base: `https://ggsoma.store/api/partner/v1`, header Bearer somente nas rotas protegidas. `/health` é público. O serviço implementa balance, providers, products, detalhe por slug/id, create order, list/detail orders e usage. Produtos são identificados por slug. **Produtos → Importar serviços** consulta uma prévia sem gravar produtos: permite buscar por nome/código/slug, filtrar fornecedor, paginar e selecionar até 100 serviços por importação. A seleção permanece ao trocar página ou filtro. Produtos já importados são identificados na janela.
+
+**Sincronizar importados** e a rotina periódica atualizam somente os serviços existentes, preservando regras locais. Novos serviços do fornecedor aguardam seleção manual. Ausentes ficam indisponíveis sem remover histórico. A importação selecionada não desativa produtos fora da seleção, nem redefine preço, margem, visibilidade ou autorização existentes. Importação e auditoria são gravadas na mesma transação. Consultas ao catálogo não fazem compras nem consomem saldo no fornecedor.
 
 Limites em `.env`: `PARTNER_REQUESTS_PER_MINUTE` e `PARTNER_ORDERS_PER_MINUTE`. Planos documentados: limited 10/2, standard 60/10, premium 300/50. As contagens são compartilhadas somente entre os processos desta instalação; outras aplicações com a mesma chave também consomem o limite do fornecedor. Prefira uma chave própria para esta instalação.
 

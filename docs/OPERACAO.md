@@ -1,5 +1,13 @@
 # Operação e troubleshooting
 
+## Importar serviços
+
+Em **Produtos → Importar serviços**, consulte o catálogo da Partner, pesquise por nome/código/slug e filtre o fornecedor. Marque os serviços desejados e clique em **Importar selecionados**. A janela mostra custo em USD, estoque e indicação dos serviços já importados. Você pode revisar a seleção e remover itens antes de importar; ela é mantida entre páginas e filtros. São até 100 serviços por operação.
+
+Após importar, abra **Editar** para definir preço/margem e, em **Disponibilidade**, conferir e autorizar a revenda. Os novos produtos aguardam essa autorização antes de aparecerem no bot. **Sincronizar importados** atualiza custo/estoque dos serviços já cadastrados; a atualização automática também respeita a escolha e não adiciona outros serviços do fornecedor.
+
+Se a consulta falhar, o erro fica na janela com a opção **Tentar novamente**. Confira a chave Partner em Configurações. Erros de autenticação do fornecedor não desconectam sua sessão administrativa. A imagem de erro genérico, sozinha, não identifica a causa na VPS; o novo fluxo diferencia integração ausente, recusa da Partner, formato incompatível e falha ao gravar o catálogo.
+
 ## Serviços
 
 ```bash

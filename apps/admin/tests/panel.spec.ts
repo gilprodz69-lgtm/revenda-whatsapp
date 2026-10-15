@@ -17,6 +17,16 @@ const dashboard = {
 async function mockApi(page: Page, loggedIn = true) {
   const settings: Record<string, unknown> = {};
   const secrets: Record<string, boolean> = {};
+  const imported = new Set(['service-1']);
+  const catalog = Array.from({ length: 28 }, (_, index) => ({
+    slug: `service-${index + 1}`,
+    name: `Serviço ${String(index + 1).padStart(2, '0')}`,
+    code: `SVC-${index + 1}`,
+    provider: index % 2 ? { key: 'openai', name: 'OpenAI' } : { key: 'gemini', name: 'Gemini' },
+    costUsd: '5.00',
+    stock: 10,
+    available: true,
+  }));
   await page.route('**/api/**', async (route) => {
     const req = route.request(),
       url = new URL(req.url());
@@ -29,7 +39,32 @@ async function mockApi(page: Page, loggedIn = true) {
       loggedIn = true;
       body = { admin, csrf: 'test' };
     } else if (url.pathname === '/api/dashboard') body = dashboard;
-    else if (url.pathname === '/api/products' && req.method() === 'GET')
+    else if (url.pathname === '/api/products/catalog') {
+      const search = (url.searchParams.get('search') ?? '').toLowerCase();
+      const provider = url.searchParams.get('provider') ?? '';
+      const current = Number(url.searchParams.get('page') ?? '1');
+      const filtered = catalog.filter(
+        (service) =>
+          (!provider || service.provider.key === provider) &&
+          `${service.name} ${service.code}`.toLowerCase().includes(search),
+      );
+      body = {
+        data: filtered
+          .slice((current - 1) * 25, current * 25)
+          .map((service) => ({ ...service, imported: imported.has(service.slug) })),
+        total: filtered.length,
+        page: current,
+        limit: 25,
+        providers: [
+          { key: 'gemini', name: 'Gemini' },
+          { key: 'openai', name: 'OpenAI' },
+        ],
+      };
+    } else if (url.pathname === '/api/products/import' && req.method() === 'POST') {
+      const slugs = req.postDataJSON().slugs as string[];
+      slugs.forEach((slug) => imported.add(slug));
+      body = { imported: slugs.length, syncedAt: new Date().toISOString() };
+    } else if (url.pathname === '/api/products' && req.method() === 'GET')
       body = {
         data: [
           {
@@ -136,6 +171,85 @@ test('edita regras de produto com valores financeiros em strings', async ({ page
     authorizedResale: true,
   });
   await expect(page.getByRole('dialog')).not.toBeVisible();
+});
+
+test('escolhe serviços da Partner com busca, paginação e seleção preservada', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Importar serviços', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Importar serviços', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Selecionar Serviço 01', exact: true }),
+  ).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: 'Selecionar Serviço 02', exact: true }).check();
+  await dialog.getByRole('button', { name: 'Próxima', exact: true }).click();
+  await dialog.getByRole('checkbox', { name: 'Selecionar Serviço 27', exact: true }).check();
+  await dialog.getByRole('button', { name: 'Anterior', exact: true }).click();
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Selecionar Serviço 02', exact: true }),
+  ).toBeChecked();
+  await dialog.getByLabel('Buscar serviços', { exact: true }).fill('SVC-2');
+  await dialog.getByRole('combobox', { name: 'Fornecedor', exact: true }).selectOption('openai');
+  await expect(
+    dialog.getByText('2 selecionado(s) · 6 serviço(s) encontrado(s)', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Selecionar Serviço 02', exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Selecionar Serviço 27', exact: true }),
+  ).not.toBeVisible();
+  await dialog.getByText('Revisar seleção (2)', { exact: true }).click();
+  await expect(
+    dialog.getByRole('button', { name: 'Remover Serviço 27 da seleção', exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `test-results/catalog-import-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+  const mutation = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname === '/api/products/import',
+  );
+  await dialog.getByRole('button', { name: 'Importar selecionados (2)', exact: true }).click();
+  expect((await mutation).postDataJSON()).toEqual({ slugs: ['service-2', 'service-27'] });
+  await expect(dialog).not.toBeVisible();
+  await expect(
+    page.getByText('2 serviço(s) importado(s). Revise o preço e autorize a revenda em Editar.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
+test('mostra erro da Partner na janela de importação e permite tentar novamente', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let fail = true;
+  await page.route('**/api/products/catalog?**', async (route) => {
+    if (!fail) return route.fallback();
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Configure a chave da Partner API.' }),
+    });
+  });
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Importar serviços', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Importar serviços', exact: true });
+  await expect(dialog.getByRole('alert')).toHaveText('Configure a chave da Partner API.');
+  fail = false;
+  await dialog.getByRole('button', { name: 'Tentar novamente', exact: true }).click();
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Selecionar Serviço 02', exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByRole('alert')).not.toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
 });
 
 test('modal contém o foco, permite navegar nas abas por teclado e fecha com Escape', async ({

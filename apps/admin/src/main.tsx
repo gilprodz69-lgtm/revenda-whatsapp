@@ -25,6 +25,7 @@ import {
   Search,
   LoaderCircle,
   Plus,
+  Download,
 } from 'lucide-react';
 import { api, HttpError, type Row } from './api';
 import './style.css';
@@ -32,6 +33,7 @@ import './filters.css';
 import './theme.css';
 import './glow';
 import { EditorDialog, ProductFields } from './editor';
+import { CatalogImport } from './catalog-import';
 import { EvolutionActivation, activationReturn } from './evolution-activation';
 const brl = (v: unknown) => `R$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const usd = (v: unknown) => `US$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
@@ -194,6 +196,7 @@ function App() {
   const [filter, setFilter] = useState(''),
     [chartDays, setChartDays] = useState('30');
   const [gatewayDraft, setGatewayDraft] = useState<string | null>(null);
+  const [importingCatalog, setImportingCatalog] = useState(false);
   const report = useCallback((e: unknown) => {
     if (e instanceof HttpError && e.status === 401) setAdmin(null);
     setToast({ message: e instanceof Error ? e.message : String(e), error: true });
@@ -271,6 +274,7 @@ function App() {
     if (type === 'order' && row) void api(`/orders/${row.id}`).then(setDetail).catch(report);
   }
   function go(id: string) {
+    setImportingCatalog(false);
     setGatewayDraft(null);
     loadSequence.current++;
     setData(null);
@@ -370,7 +374,7 @@ function App() {
           <h3>Nenhum registro encontrado</h3>
           <p>
             {page === 'products'
-              ? 'Configure a Partner API e sincronize o catálogo.'
+              ? 'Clique em Importar serviços para escolher os produtos da Partner.'
               : 'Os registros aparecerão conforme sua operação avançar.'}
           </p>
         </div>
@@ -520,13 +524,32 @@ function App() {
                     <RefreshCw size={16} className={loading ? 'spin' : ''} /> Atualizar
                   </button>
                   {page === 'products' && canOperate && (
-                    <button
-                      className="primary"
-                      disabled={busy}
-                      onClick={() => void act('/products/sync').catch(() => {})}
-                    >
-                      <RefreshCw size={16} /> Sincronizar catálogo
-                    </button>
+                    <>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() =>
+                          void act(
+                            '/products/sync',
+                            'POST',
+                            undefined,
+                            'Produtos importados atualizados. Para adicionar novos, use Importar serviços.',
+                          ).catch(() => {})
+                        }
+                      >
+                        <RefreshCw size={16} /> Sincronizar importados
+                      </button>
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => {
+                          setToast(null);
+                          setImportingCatalog(true);
+                        }}
+                      >
+                        <Download size={16} /> Importar serviços
+                      </button>
+                    </>
                   )}
                   {page === 'whatsapp' && canConfigure && (
                     <button className="primary" onClick={() => open('instance')}>
@@ -1487,6 +1510,19 @@ function App() {
               </footer>
             </main>
           </div>
+          {importingCatalog && (
+            <CatalogImport
+              onClose={() => setImportingCatalog(false)}
+              onError={report}
+              onImported={async (count) => {
+                setImportingCatalog(false);
+                notify(
+                  `${count} serviço(s) importado(s). Revise o preço e autorize a revenda em Editar.`,
+                );
+                await load();
+              }}
+            />
+          )}
           {modal && (
             <EditorDialog
               key={modal.type + (modal.row?.id ?? modal.row?.slug ?? modal.row?.name ?? '')}

@@ -6,11 +6,11 @@ import { placeOrder, processOrder, refundOrder } from '../../src/modules/orders.
 import { createDeposit, reconcilePayment } from '../../src/modules/payments.js';
 import { prepareDeliveries, dispatchMessage } from '../../src/modules/messaging.js';
 import { processIncoming } from '../../src/modules/conversation.js';
-import { syncCatalog } from '../../src/modules/catalog.js';
+import { syncCatalog, browseCatalog, importCatalog } from '../../src/modules/catalog.js';
 import { partner } from '../../src/integrations/partner.js';
 import { evolution, InteractiveRejected } from '../../src/integrations/evolution.js';
 import { PartnerError, AppError } from '../../src/core/errors.js';
-import { encrypt, decrypt } from '../../src/core/crypto.js';
+import { encrypt, decrypt, hash } from '../../src/core/crypto.js';
 import type { Interactive } from '../../src/modules/interactive.js';
 import { saveSetting, credentials } from '../../src/core/settings.js';
 import { buildApp } from '../../src/app.js';
@@ -771,6 +771,155 @@ describe('Catálogo, webhooks e fluxo completo', () => {
       (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
     ).toBe('20.00');
     expect(await db.ledgerEntry.count({ where: { kind: 'DEPOSIT' } })).toBe(1);
+  });
+});
+describe('Importação seletiva do catálogo', () => {
+  const remote = {
+    ...live,
+    id: 43,
+    slug: 'new-service',
+    name: 'Novo serviço',
+    productCode: 'NEW-43',
+  };
+  it('consulta e filtra a prévia sem importar produtos', async () => {
+    vi.spyOn(partner, 'products').mockResolvedValue({ data: [live, remote] });
+    const preview = await browseCatalog({
+      search: 'NEW-43',
+      provider: 'gemini',
+      page: 1,
+      limit: 25,
+    });
+    expect(preview.data).toMatchObject([{ slug: 'new-service', imported: false, costUsd: '1.00' }]);
+    expect(preview.total).toBe(1);
+    const current = await browseCatalog({ search: 'product', provider: '', page: 1, limit: 25 });
+    expect(current.data[0]?.imported).toBe(true);
+    expect(await db.product.count()).toBe(1);
+  });
+  it('importa somente a seleção, preserva regras e não adiciona outros serviços na sincronização', async () => {
+    const other = { ...remote, id: 44, slug: 'other-service', name: 'Outro serviço' };
+    vi.spyOn(partner, 'products').mockResolvedValue({ data: [live, remote, other] });
+    const result = await importCatalog(['new-service', 'new-service'], 'test-owner');
+    expect(result.imported).toBe(1);
+    expect(await db.product.count()).toBe(2);
+    expect(await db.product.findUnique({ where: { slug: other.slug } })).toBeNull();
+    const imported = await db.product.findUniqueOrThrow({ where: { slug: remote.slug } });
+    expect(imported.authorizedResale).toBe(false);
+    await db.product.update({
+      where: { slug: remote.slug },
+      data: { manualPrice: '35.90', authorizedResale: true },
+    });
+    vi.mocked(partner.products).mockResolvedValue({
+      data: [live, { ...remote, yourPrice: '2.00' }, other],
+    });
+    await importCatalog(['new-service'], 'test-owner');
+    await syncCatalog();
+    const updated = await db.product.findUniqueOrThrow({ where: { slug: remote.slug } });
+    expect(updated.manualPrice?.toFixed(2)).toBe('35.90');
+    expect(updated.authorizedResale).toBe(true);
+    expect(updated.costUsd.toFixed(2)).toBe('2.00');
+    expect(await db.product.count()).toBe(2);
+    expect(await db.auditLog.count({ where: { action: 'catalog.import' } })).toBe(2);
+  });
+  it('rejeita uma seleção que saiu do catálogo sem importar parcialmente', async () => {
+    vi.spyOn(partner, 'products').mockResolvedValue({ data: [live, remote] });
+    await expect(importCatalog(['new-service', 'missing'], 'test-owner')).rejects.toMatchObject({
+      code: 'CATALOG_CHANGED',
+    });
+    expect(await db.product.count()).toBe(1);
+    expect(await db.auditLog.count()).toBe(0);
+    // Lock is released even on failure.
+    expect((await importCatalog(['new-service'], 'test-owner')).imported).toBe(1);
+  });
+  it('protege importação com sessão, CSRF e permissão; erro Partner não encerra a sessão admin', async () => {
+    const owner = await db.admin.create({
+      data: {
+        email: 'import@example.com',
+        passwordHash: 'not-used-session-fixture',
+        role: 'OWNER',
+      },
+    });
+    const token = randomUUID(),
+      csrf = randomUUID();
+    await db.adminSession.create({
+      data: {
+        id: hash(token),
+        adminId: owner.id,
+        csrfHash: hash(csrf),
+        expiresAt: new Date(Date.now() + 60000),
+      },
+    });
+    const headers = {
+      cookie: `session=${token}`,
+      origin: process.env.APP_ORIGIN!,
+      'x-csrf-token': csrf,
+    };
+    const products = vi.spyOn(partner, 'products').mockResolvedValue({ data: [live, remote] });
+    const app = await buildApp();
+    try {
+      expect((await app.inject({ method: 'GET', url: '/api/products/catalog' })).statusCode).toBe(
+        401,
+      );
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/products/import',
+            headers: { cookie: headers.cookie },
+            payload: { slugs: [remote.slug] },
+          })
+        ).statusCode,
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/products/import',
+            headers,
+            payload: { slugs: [] },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const preview = await app.inject({
+        method: 'GET',
+        url: '/api/products/catalog?search=NEW-43',
+        headers,
+      });
+      expect(preview.statusCode).toBe(200);
+      expect(preview.json().data[0].slug).toBe(remote.slug);
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/api/products/import',
+        headers,
+        payload: { slugs: [remote.slug] },
+      });
+      expect(imported.statusCode).toBe(200);
+      expect(imported.json().imported).toBe(1);
+      const synced = await app.inject({ method: 'POST', url: '/api/products/sync', headers });
+      expect(synced.statusCode).toBe(200);
+      products.mockRejectedValueOnce(new PartnerError('INVALID_API_KEY', 'req-test', 401));
+      const failed = await app.inject({ method: 'GET', url: '/api/products/catalog', headers });
+      expect(failed.statusCode).toBe(502);
+      expect(failed.json()).toMatchObject({
+        code: 'CATALOG_INVALID_API_KEY',
+        message: expect.stringContaining('Configurações'),
+      });
+      await db.admin.update({ where: { id: owner.id }, data: { role: 'VIEWER' } });
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/products/catalog', headers })).statusCode,
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/products/import',
+            headers,
+            payload: { slugs: [remote.slug] },
+          })
+        ).statusCode,
+      ).toBe(403);
+    } finally {
+      await app.close();
+    }
   });
 });
 describe('Expay Brasil', () => {

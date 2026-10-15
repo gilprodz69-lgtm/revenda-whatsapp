@@ -12,7 +12,7 @@ import { hash, equalSecret, encrypt, decrypt } from './core/crypto.js';
 import { AppError } from './core/errors.js';
 import { authenticate, requirePermission, login } from './modules/auth.js';
 import { setting, saveSetting } from './core/settings.js';
-import { syncCatalog } from './modules/catalog.js';
+import { syncCatalog, browseCatalog, importCatalog } from './modules/catalog.js';
 import { adjustBalance } from './modules/wallet.js';
 import { refundOrder } from './modules/orders.js';
 import { refreshExchange } from './modules/exchange.js';
@@ -362,8 +362,23 @@ export async function buildApp() {
       admin.post('/products/sync', async (request) => {
         requirePermission(request, 'operate');
         const result = await syncCatalog();
-        await audit(request.admin.id, 'catalog.sync', 'catalog', result as never);
+        await audit(request.admin.id, 'catalog.sync', 'catalog', result);
         return result;
+      });
+      admin.get('/products/catalog', async (request) => {
+        requirePermission(request, 'operate');
+        const query = paging
+          .extend({ provider: z.string().max(100).default('') })
+          .parse(request.query);
+        return browseCatalog(query);
+      });
+      admin.post('/products/import', async (request) => {
+        requirePermission(request, 'operate');
+        const { slugs } = z
+          .object({ slugs: z.array(z.string().min(1).max(255)).min(1).max(100) })
+          .strict()
+          .parse(request.body);
+        return importCatalog(slugs, request.admin.id);
       });
       admin.patch('/products/:slug', async (request) => {
         requirePermission(request, 'configure');
