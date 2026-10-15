@@ -1,6 +1,6 @@
 # Revenda — loja WhatsApp
 
-Monorepo de venda por WhatsApp com Fastify, React, PostgreSQL/Prisma, Redis/BullMQ, Evolution API **2.4.0-rc2** e Partner API v1. Interface e atendimento em português brasileiro. A Evolution usa uma versão candidata solicitada pelo operador e exige ativação oficial, disponível na aba WhatsApp do painel.
+Monorepo de venda por WhatsApp com Fastify, React, PostgreSQL/Prisma, Redis/BullMQ, Evolution API **2.4.0-rc2**, Partner API v1 e múltiplos provedores SMM API v2. Interface e atendimento em português brasileiro. A Evolution usa uma versão candidata solicitada pelo operador e exige ativação oficial, disponível na aba WhatsApp do painel.
 
 O contrato do fornecedor está em [docs/references/partner-api-docs.html](docs/references/partner-api-docs.html), fornecido pelo proprietário do projeto. Não há produtos fictícios, pagamento aprovado por comprovante ou gateway de demonstração no runtime.
 
@@ -26,6 +26,8 @@ No painel:
 4. Na aba WhatsApp, conclua **Iniciar ativação → Abrir cadastro oficial → Confirmar ativação** da Evolution. Depois crie/conecte a instância pelo QR Code ou pareamento. Instâncias existentes são preservadas. Em Configurações, escolha **Botões e listas**, defina as palavras-chave e selecione o menu principal com três botões visíveis ou uma lista completa. Categorias e produtos usam listas.
 5. Para depósitos, confira **Expay Brasil** e a chave da API atual em Configurações. Se sua operação exigir, informe o ID da loja. Configure na loja Expay o webhook `https://SEU_DOMINIO/webhooks/pix/expay`. O sistema também consulta as cobranças automaticamente e só credita saldo após confirmação autenticada de valor, referência, moeda e método.
 6. Execute os critérios de [homologação](docs/HOMOLOGACAO.md) antes de abrir vendas.
+
+Para SMM, abra **Provedores SMM → Novo provedor**, informe URL HTTPS, chave e moeda da conta, teste a conexão e importe apenas os serviços desejados. Em **Categorias**, crie/edite nome, descrição, ordem e visibilidade. Cada produto pode receber uma categoria da loja sem mudar seu fornecedor. Consulte o [guia SMM](docs/SMM.md) para tipos, preços por 1.000/pacote e acompanhamento de pedidos. A Partner continua disponível com seu fluxo próprio.
 
 O cliente adiciona saldo por Pix, recebe crédito confirmado pelo gateway e então confirma a compra com a carteira. Compra direta por Pix atrelado a um pedido não é oferecida nesta versão: o depósito e o pedido possuem identidades separadas e auditáveis.
 

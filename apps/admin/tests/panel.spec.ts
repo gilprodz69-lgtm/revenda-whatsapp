@@ -365,6 +365,61 @@ test('cria, edita e oculta categorias e atribui o produto sem mudar o fornecedor
   });
 });
 
+test('libera reserva SMM incerta somente após justificativa e conferência explícita', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let settled = false;
+  const row = () => ({
+    id: 'smm-order-review',
+    source: 'SMM',
+    status: settled ? 'FAILED' : 'REVIEW',
+    reservationSettled: settled,
+    smmOrderId: null,
+    smmProvider: { name: 'Machine SMM' },
+    customer: { name: 'Cliente teste', phone: '5511999999999' },
+    items: [{ name: 'Curtidas', quantity: 1000 }],
+    totalBrl: '10',
+    estimatedCostBrl: '5',
+    refundedBrl: '0',
+    targetLink: 'https://instagram.com/p/test',
+    deliveries: [],
+    attempts: [],
+  });
+  await page.route('**/api/orders**', async (route) => {
+    const req = route.request(),
+      path = new URL(req.url()).pathname;
+    if (path.endsWith('/smm/release')) settled = true;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(path === '/api/orders' ? { data: [row()], total: 1 } : row()),
+    });
+  });
+  await page.goto('/');
+  await navigate(page, 'Pedidos');
+  await page.getByRole('button', { name: 'Detalhes', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Detalhes do pedido' });
+  await dialog
+    .getByLabel('Justificativa da liberação (mínimo 10 caracteres)', { exact: true })
+    .fill('Conferência no painel: pedido ausente.');
+  const submit = dialog.getByRole('button', {
+    name: 'Liberar reserva após conferência',
+    exact: true,
+  });
+  await submit.click();
+  expect(settled).toBe(false);
+  await dialog
+    .getByLabel('Confirmei no provedor que este pedido não foi criado.', { exact: true })
+    .check();
+  const sent = page.waitForRequest((req) => req.url().endsWith('/smm/release'));
+  await submit.click();
+  expect((await sent).postDataJSON()).toEqual({
+    reason: 'Conferência no painel: pedido ausente.',
+    confirmed: true,
+  });
+  await expect(submit).not.toBeVisible();
+});
+
 test('identifica preço SMM por mil e mantém o catálogo Partner junto dos serviços', async ({
   page,
 }) => {

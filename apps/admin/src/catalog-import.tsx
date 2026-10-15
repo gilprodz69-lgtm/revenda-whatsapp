@@ -266,7 +266,7 @@ export function CatalogImport({
                   <strong>{service.name}</strong>
                   <small>
                     {service.provider.name} · {service.code || service.slug}
-                    {smmProvider && ` · Mín. ${service.minQuantity} · Máx. ${service.stock}`}
+                    {smmProvider && ` · Mín. ${service.minQuantity ?? 0} · Máx. ${service.stock}`}
                   </small>
                 </span>
                 <span className="import-service-cost">

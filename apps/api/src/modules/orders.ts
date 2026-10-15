@@ -216,7 +216,7 @@ async function finalizeOrder(orderId: string, external: PartnerOrder) {
     });
   });
 }
-export async function failOrder(orderId: string, code: string) {
+export async function failOrder(orderId: string, code: string, actorId?: string, reason?: string) {
   return transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`;
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
@@ -234,6 +234,15 @@ export async function failOrder(orderId: string, code: string) {
       where: { id: orderId },
       data: { status: 'FAILED', errorCode: code, reservationSettled: true },
     });
+    if (actorId)
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'smm.order.release',
+          target: orderId,
+          metadata: { reason: reason ?? code },
+        },
+      });
     await tx.message.upsert({
       where: { key: `order-failed-${orderId}` },
       create: {

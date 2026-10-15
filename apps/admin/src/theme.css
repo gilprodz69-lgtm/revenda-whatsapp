@@ -1367,3 +1367,39 @@ body.modal-open .shell > .workspace {
 :is(.metric, .card):focus-within::after {
   opacity: 0.65;
 }
+@media (max-width: 700px) {
+  .catalog-management table,
+  .catalog-management tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .catalog-management thead {
+    display: none;
+  }
+  .catalog-management tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  .catalog-management td {
+    display: block;
+    padding: 0;
+    border: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .catalog-management td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--muted);
+    font-size: 10px;
+    margin-bottom: 6px;
+  }
+  .catalog-management .instance-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}

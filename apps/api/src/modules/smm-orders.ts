@@ -521,3 +521,25 @@ export async function linkSmmOrder(id: string, externalId: string, actorId: stri
   await processSmmOrder(id, true);
   return { ok: true };
 }
+export async function releaseUnsentSmmOrder(id: string, actorId: string, reason: string) {
+  const order = await db.order.findUniqueOrThrow({ where: { id } });
+  if (
+    order.status === 'FAILED' &&
+    order.reservationSettled &&
+    order.errorCode === 'SMM_ADMIN_CONFIRMED_NOT_CREATED'
+  )
+    return { ok: true };
+  if (
+    order.source !== 'SMM' ||
+    order.smmOrderId ||
+    order.reservationSettled ||
+    !['REVIEW', 'UNKNOWN'].includes(order.status)
+  )
+    throw new AppError(
+      'SMM_RELEASE_NOT_ALLOWED',
+      'Apenas um pedido SMM sem identificação e em revisão pode ter a reserva liberada após conferência.',
+      409,
+    );
+  await failOrder(id, 'SMM_ADMIN_CONFIRMED_NOT_CREATED', actorId, reason);
+  return { ok: true };
+}

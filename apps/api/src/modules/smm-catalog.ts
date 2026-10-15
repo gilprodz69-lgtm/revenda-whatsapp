@@ -62,6 +62,8 @@ async function storeService(
   provider: { id: string; currency: string },
   service: SmmService,
   categoryId?: string | null,
+  restoreArchived = false,
+  assignCategory = false,
 ) {
   const data = {
     name: service.name,
@@ -105,7 +107,8 @@ async function storeService(
     },
     update: {
       ...data,
-      ...(existing?.archivedAt
+      ...(assignCategory ? { categoryId } : {}),
+      ...(restoreArchived && existing?.archivedAt
         ? { archivedAt: null, active: true, visible: true, authorizedResale: false }
         : {}),
     },
@@ -130,7 +133,8 @@ export async function importSmmServices(
       );
     if (categoryId) await db.category.findUniqueOrThrow({ where: { id: categoryId } });
     await transaction(async (tx) => {
-      for (const service of selected) await storeService(tx, provider, service!, categoryId);
+      for (const service of selected)
+        await storeService(tx, provider, service!, categoryId, true, !!categoryId);
       await tx.auditLog.create({
         data: {
           actorId,
@@ -149,17 +153,19 @@ export async function syncSmmProvider(id: string) {
     await smm.balance(provider);
     const all = await smm.services(provider, true);
     const imported = await db.product.findMany({ where: { smmProviderId: id, archivedAt: null } });
-    await transaction(async (tx) => {
-      for (const product of imported) {
-        const service = all.find((s) => s.service === product.smmServiceId);
-        if (service) await storeService(tx, provider, service, product.categoryId);
-        else
-          await tx.product.update({
-            where: { slug: product.slug },
-            data: { available: false, syncedAt: new Date() },
-          });
-      }
-    });
+    const byId = new Map(all.map((s) => [s.service, s]));
+    for (let offset = 0; offset < imported.length; offset += 100)
+      await transaction(async (tx) => {
+        for (const product of imported.slice(offset, offset + 100)) {
+          const service = byId.get(product.smmServiceId!);
+          if (service) await storeService(tx, provider, service, product.categoryId);
+          else
+            await tx.product.update({
+              where: { slug: product.slug },
+              data: { available: false, syncedAt: new Date() },
+            });
+        }
+      });
     return { products: imported.length };
   });
 }

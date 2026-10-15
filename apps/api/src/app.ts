@@ -33,7 +33,7 @@ import { orderQueue } from './core/queues.js';
 import { templates, messageTemplate } from './modules/templates.js';
 import { priceQuote, smmPriceQuote, type Tier } from './modules/pricing.js';
 import { registerCatalogAdmin } from './modules/catalog-admin.js';
-import { linkSmmOrder, processSmmOrder } from './modules/smm-orders.js';
+import { linkSmmOrder, processSmmOrder, releaseUnsentSmmOrder } from './modules/smm-orders.js';
 import { withLock } from './core/lock.js';
 import { retryEvent } from './modules/events.js';
 
@@ -659,6 +659,18 @@ export async function buildApp() {
         await prepareDeliveries();
         await notifyOutgoing();
         return { ok: true };
+      });
+      admin.post('/orders/:id/smm/release', async (request) => {
+        requirePermission(request, 'finance');
+        const { id } = idSchema.parse(request.params);
+        const { reason } = z
+          .object({ reason: z.string().trim().min(10).max(300), confirmed: z.literal(true) })
+          .parse(request.body);
+        const result = await withLock(`order:${id}`, () =>
+          releaseUnsentSmmOrder(id, request.admin.id, reason),
+        );
+        await notifyOutgoing();
+        return result;
       });
       admin.post('/orders/:id/refund', async (request) => {
         requirePermission(request, 'finance');

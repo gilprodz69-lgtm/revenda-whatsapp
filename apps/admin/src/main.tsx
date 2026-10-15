@@ -1888,7 +1888,7 @@ function App() {
                           </button>
                         </>
                       )}
-                      {canConfigure && detail.status === 'COMPLETED' && (
+                      {canConfigure && ['COMPLETED', 'PARTIAL'].includes(detail.status) && (
                         <button className="secondary" onClick={() => open('refund', detail)}>
                           Estornar carteira
                         </button>
@@ -1972,6 +1972,41 @@ function App() {
                               </label>
                               <button className="primary" disabled={busy}>
                                 Vincular pedido existente
+                              </button>
+                            </form>
+                          )}
+                        {canConfigure &&
+                          !detail.smmOrderId &&
+                          ['REVIEW', 'UNKNOWN'].includes(detail.status) && (
+                            <form
+                              className="stack permission-box"
+                              onSubmit={async (e) => {
+                                e.preventDefault();
+                                const f = new FormData(e.currentTarget);
+                                try {
+                                  await act(`/orders/${detail.id}/smm/release`, 'POST', {
+                                    reason: f.get('reason'),
+                                    confirmed: f.has('confirmed'),
+                                  });
+                                  setDetail(await api(`/orders/${detail.id}`));
+                                } catch {}
+                              }}
+                            >
+                              <p>
+                                Se confirmou que o pedido não existe no provedor, libere a reserva
+                                para a carteira do cliente.
+                              </p>
+                              <Field
+                                name="reason"
+                                label="Justificativa da liberação (mínimo 10 caracteres)"
+                                required
+                              />
+                              <label className="toggle">
+                                <input type="checkbox" name="confirmed" required />
+                                <span>Confirmei no provedor que este pedido não foi criado.</span>
+                              </label>
+                              <button className="secondary" disabled={busy}>
+                                Liberar reserva após conferência
                               </button>
                             </form>
                           )}

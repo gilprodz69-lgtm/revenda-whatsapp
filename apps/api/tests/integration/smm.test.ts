@@ -263,6 +263,9 @@ it('não altera serviços SMM ao sincronizar Partner nem perde preços/categoria
   expect((await db.product.findUniqueOrThrow({ where: { slug } })).archivedAt).not.toBeNull();
   await importSmmServices(providerId, ['1'], undefined, 'owner');
   expect((await db.product.findUniqueOrThrow({ where: { slug } })).authorizedResale).toBe(false);
+  const moved = await db.category.create({ data: { name: 'Categoria escolhida na importação' } });
+  await importSmmServices(providerId, ['1'], moved.id, 'owner');
+  expect((await db.product.findUniqueOrThrow({ where: { slug } })).categoryId).toBe(moved.id);
 });
 it('reserva, envia uma única vez sob concorrência, acompanha status e entrega sem duplicar o débito', async () => {
   const key = randomUUID(),
@@ -353,6 +356,55 @@ it('não repete add incerto, conserva a reserva e permite vincular o pedido real
   await linkSmmOrder(first.id, '12345', 'owner');
   expect(await wallet()).toEqual({ available: '90.00', reserved: '0.00' });
   expect(additions).toHaveLength(1);
+});
+it('exige conferência, permissão financeira e CSRF para liberar criação incerta sem repetir add', async () => {
+  const first = await order();
+  const base = transport.getMockImplementation()!;
+  transport.mockImplementation(async (url, body) => {
+    if (new URLSearchParams(body).get('action') === 'add') {
+      additions.push(new URLSearchParams(body));
+      throw new Error('Lost response');
+    }
+    return base(url, body);
+  });
+  await processOrder(first.id);
+  const { owner, headers } = await session(),
+    app = await buildApp();
+  const url = `/api/orders/${first.id}/smm/release`;
+  const payload = { reason: 'Conferido no painel: pedido não criado.', confirmed: true };
+  try {
+    expect(
+      (await app.inject({ method: 'POST', url, headers: { cookie: headers.cookie }, payload }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          headers,
+          payload: { ...payload, confirmed: false },
+        })
+      ).statusCode,
+    ).toBe(400);
+    await db.admin.update({ where: { id: owner.id }, data: { role: 'OPERATOR' } });
+    expect((await app.inject({ method: 'POST', url, headers, payload })).statusCode).toBe(403);
+    expect(await wallet()).toEqual({ available: '90.00', reserved: '10.00' });
+    await db.admin.update({ where: { id: owner.id }, data: { role: 'OWNER' } });
+    for (let i = 0; i < 2; i++)
+      expect((await app.inject({ method: 'POST', url, headers, payload })).statusCode).toBe(200);
+    await processOrder(first.id);
+    expect(additions).toHaveLength(1);
+    expect(await wallet()).toEqual({ available: '100.00', reserved: '0.00' });
+    expect(
+      await db.auditLog.count({
+        where: { action: 'smm.order.release', target: first.id, actorId: owner.id },
+      }),
+    ).toBe(1);
+    expect((await db.order.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('FAILED');
+  } finally {
+    await app.close();
+  }
 });
 it('libera reserva em recusa explícita e quando o custo muda antes do add', async () => {
   const first = await order();

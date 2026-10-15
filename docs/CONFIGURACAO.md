@@ -1,5 +1,7 @@
 # Configuração
 
+Provedores SMM, categorias da loja, tipos avulsos e preços por 1.000/pacote: [guia SMM](SMM.md). As configurações da Partner abaixo continuam independentes.
+
 ## Segredos
 
 `ENCRYPTION_KEY` deve conter 64 caracteres hexadecimais (32 bytes). `WEBHOOK_SECRET` e `EVOLUTION_API_KEY` são gerados com 32 bytes. Mantenha `.env` em modo 0600; `secrets` em 0700. A senha inicial fica em `secrets/admin-password`, root:1000, modo 0640, para o container da migração ler sem executar como root. Execuções repetidas não redefinem senhas existentes.

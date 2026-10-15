@@ -114,7 +114,7 @@ export function CatalogManagement({
             </p>
           </div>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap catalog-management">
             <table>
               <thead>
                 <tr>
@@ -127,7 +127,7 @@ export function CatalogManagement({
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td>
+                    <td data-label="Nome">
                       <b>{row.name}</b>
                       <small>
                         {providers
@@ -136,7 +136,7 @@ export function CatalogManagement({
                       </small>
                       {balances[row.id] && <small role="status">{balances[row.id]}</small>}
                     </td>
-                    <td>
+                    <td data-label={providers ? 'API / moeda' : 'Ordem / serviços'}>
                       {providers ? (
                         <>
                           <span>{row.url}</span>
@@ -148,12 +148,12 @@ export function CatalogManagement({
                         `${row.sortOrder} · ${row._count?.products ?? 0} serviços`
                       )}
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <span className={`badge ${row.active ? 'success' : 'neutral'}`}>
                         {row.active ? 'Ativo' : 'Oculto / desativado'}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Ações">
                       <div className="instance-actions">
                         {providers && canEdit && (
                           <>
