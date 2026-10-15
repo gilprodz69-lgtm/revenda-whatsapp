@@ -35,7 +35,9 @@ export async function browseCatalog(query: {
 }) {
   const products = await upstreamCatalog();
   const imported = new Set(
-    (await db.product.findMany({ select: { slug: true } })).map((p) => p.slug),
+    (await db.product.findMany({ where: { archivedAt: null }, select: { slug: true } })).map(
+      (p) => p.slug,
+    ),
   );
   const search = query.search.toLocaleLowerCase('pt-BR');
   const filtered = products
@@ -164,6 +166,11 @@ export async function importCatalog(slugs: string[], actorId: string) {
     const now = new Date();
     const result = { imported: selected.length, syncedAt: now.toISOString() };
     await transaction(async (tx) => {
+      // Explicit reimport restores a listing as a draft while retaining its pricing rules.
+      await tx.product.updateMany({
+        where: { slug: { in: selected.map((p) => p.slug) }, archivedAt: { not: null } },
+        data: { archivedAt: null, active: true, visible: true, authorizedResale: false },
+      });
       await storeProducts(tx, selected, now);
       await tx.auditLog.create({
         data: {
@@ -178,11 +185,34 @@ export async function importCatalog(slugs: string[], actorId: string) {
   });
 }
 
+export async function archiveProduct(slug: string, actorId: string) {
+  return transaction(async (tx) => {
+    const product = await tx.product.findUniqueOrThrow({ where: { slug } });
+    if (!product.archivedAt) {
+      await tx.product.update({
+        where: { slug },
+        data: { archivedAt: new Date(), active: false, visible: false, authorizedResale: false },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'product.delete',
+          target: slug,
+          metadata: { historyPreserved: true },
+        },
+      });
+    }
+    return { slug, archived: true };
+  });
+}
+
 export async function syncCatalog() {
   return catalogWrite(async () => {
     const products = await upstreamCatalog();
     const imported = new Set(
-      (await db.product.findMany({ select: { slug: true } })).map((p) => p.slug),
+      (await db.product.findMany({ where: { archivedAt: null }, select: { slug: true } })).map(
+        (p) => p.slug,
+      ),
     );
     const selected = products.filter((p) => imported.has(p.slug) && p.currency === 'USD');
     const now = new Date();
@@ -190,7 +220,10 @@ export async function syncCatalog() {
       await storeProducts(tx, selected, now);
       // Retain local rules/history while excluding products absent from the complete upstream list.
       await tx.product.updateMany({
-        where: { slug: { notIn: products.filter((p) => p.currency === 'USD').map((p) => p.slug) } },
+        where: {
+          archivedAt: null,
+          slug: { notIn: products.filter((p) => p.currency === 'USD').map((p) => p.slug) },
+        },
         data: { available: false, stock: 0, syncedAt: now },
       });
     });

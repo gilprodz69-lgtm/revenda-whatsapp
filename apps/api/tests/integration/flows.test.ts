@@ -2,11 +2,16 @@ import { beforeAll, beforeEach, afterAll, it, expect, vi, describe } from 'vites
 import { randomUUID } from 'node:crypto';
 import { db, redis, transaction } from '../../src/core/db.js';
 import { mutateWallet } from '../../src/modules/wallet.js';
-import { placeOrder, processOrder, refundOrder } from '../../src/modules/orders.js';
+import { placeOrder, processOrder, refundOrder, quoteProduct } from '../../src/modules/orders.js';
 import { createDeposit, reconcilePayment } from '../../src/modules/payments.js';
 import { prepareDeliveries, dispatchMessage } from '../../src/modules/messaging.js';
 import { processIncoming } from '../../src/modules/conversation.js';
-import { syncCatalog, browseCatalog, importCatalog } from '../../src/modules/catalog.js';
+import {
+  syncCatalog,
+  browseCatalog,
+  importCatalog,
+  archiveProduct,
+} from '../../src/modules/catalog.js';
 import { partner } from '../../src/integrations/partner.js';
 import { evolution, InteractiveRejected } from '../../src/integrations/evolution.js';
 import { PartnerError, AppError } from '../../src/core/errors.js';
@@ -298,6 +303,7 @@ describe('Ledger transacional, pedidos e recuperação', () => {
 });
 describe('Catálogo, webhooks e fluxo completo', () => {
   it('navega por botões e listas, ignora menu antigo e confirma a compra uma vez', async () => {
+    await saveSetting('bot.mainMenuStyle', 'list');
     await credit();
     async function receive(text: string, native = false, list = false) {
       const event = await db.webhookEvent.create({
@@ -1093,6 +1099,329 @@ describe('Importação seletiva do catálogo', () => {
     }
   });
 });
+describe('Produtos da loja e acesso rápido ao Pix', () => {
+  async function ownerSession() {
+    const owner = await db.admin.create({
+      data: {
+        email: 'products@example.com',
+        passwordHash: 'session-fixture',
+        role: 'OWNER',
+      },
+    });
+    const token = randomUUID(),
+      csrf = randomUUID();
+    await db.adminSession.create({
+      data: {
+        id: hash(token),
+        adminId: owner.id,
+        csrfHash: hash(csrf),
+        expiresAt: new Date(Date.now() + 60000),
+      },
+    });
+    return {
+      owner,
+      headers: {
+        cookie: `session=${token}`,
+        origin: process.env.APP_ORIGIN!,
+        'x-csrf-token': csrf,
+      },
+    };
+  }
+  async function receive(text: string) {
+    const event = await db.webhookEvent.create({
+      data: {
+        key: randomUUID(),
+        source: 'evolution',
+        encryptedPayload: encrypt(
+          JSON.stringify({
+            instance: 'store',
+            data: {
+              key: { id: randomUUID(), remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+              message: { conversation: text },
+            },
+          }),
+        ),
+      },
+    });
+    await processIncoming(event.id);
+    await processIncoming(event.id);
+    return db.message.findUnique({ where: { key: `reply-${event.key}` } });
+  }
+  it('envia menu com três botões visíveis e mantém acesso à carteira e listas de categorias', async () => {
+    const options = (message: NonNullable<Awaited<ReturnType<typeof receive>>>) =>
+      JSON.parse(decrypt(message.encryptedInteractive!));
+    const first = options((await receive('menu'))!);
+    expect(first.type).toBe('buttons');
+    expect(first.buttons.map((b: { title: string }) => b.title)).toEqual([
+      '🛒 Comprar serviços',
+      '💰 Meu saldo',
+      '🎧 Suporte',
+    ]);
+    expect(first.description).not.toContain('1 - Ver produtos');
+    const wallet = options((await receive(first.buttons[1].id))!);
+    expect(wallet.type).toBe('list');
+    expect(wallet.rows.map((r: { title: string }) => r.title)).toEqual([
+      '💳 Adicionar saldo',
+      '📦 Meus pedidos',
+      '👤 Minha conta',
+      'Menu principal',
+    ]);
+    const second = options((await receive('menu'))!);
+    expect(second.type).toBe('buttons');
+    expect(second.buttons[0].id).not.toBe(first.buttons[0].id);
+    expect(await receive(first.buttons[0].id)).toBeNull();
+    expect(options((await receive(second.buttons[0].id))!).type).toBe('list');
+  });
+  it('edita nome/descrição com permissão, validação e persistência após sincronizar', async () => {
+    const { owner, headers } = await ownerSession();
+    const app = await buildApp();
+    const payload = {
+      displayName: 'Gemini da loja',
+      description: 'Descrição escrita pelo lojista.\nAtivação no seu e-mail.',
+    };
+    try {
+      expect(
+        (await app.inject({ method: 'PATCH', url: '/api/products/product', payload })).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/products/product',
+            headers: { cookie: headers.cookie },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(403);
+      await db.admin.update({ where: { id: owner.id }, data: { role: 'OPERATOR' } });
+      expect(
+        (await app.inject({ method: 'PATCH', url: '/api/products/product', headers, payload }))
+          .statusCode,
+      ).toBe(403);
+      expect(
+        (await app.inject({ method: 'DELETE', url: '/api/products/product', headers })).statusCode,
+      ).toBe(403);
+      await db.admin.update({ where: { id: owner.id }, data: { role: 'OWNER' } });
+      for (const invalid of [
+        { displayName: '' },
+        { displayName: 'x'.repeat(151) },
+        { description: 'x'.repeat(2501) },
+      ])
+        expect(
+          (
+            await app.inject({
+              method: 'PATCH',
+              url: '/api/products/product',
+              headers,
+              payload: invalid,
+            })
+          ).statusCode,
+        ).toBe(400);
+      expect(
+        (await app.inject({ method: 'PATCH', url: '/api/products/product', headers, payload }))
+          .statusCode,
+      ).toBe(200);
+      vi.spyOn(partner, 'products').mockResolvedValue({
+        data: [{ ...live, name: 'Novo nome do fornecedor', description: 'Texto externo' }],
+      });
+      await syncCatalog();
+      const listed = await app.inject({
+        method: 'GET',
+        url: '/api/products?search=Gemini%20da%20loja',
+        headers,
+      });
+      expect(listed.json()).toMatchObject({
+        total: 1,
+        data: [{ ...payload, name: payload.displayName, supplierName: 'Novo nome do fornecedor' }],
+      });
+      expect((await quoteProduct('product', 1)).product.name).toBe(payload.displayName);
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/products/product',
+            headers,
+            payload: { displayName: null, description: null },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect((await quoteProduct('product', 1)).product).toMatchObject({
+        name: 'Novo nome do fornecedor',
+        description: null,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+  it('exclui com confirmação HTTP protegida, oculta novas compras e mantém pedido e entrega existentes', async () => {
+    await credit();
+    const order = await purchase();
+    const { headers } = await ownerSession();
+    const app = await buildApp();
+    vi.spyOn(partner, 'products').mockResolvedValue({ data: [live] });
+    try {
+      expect(
+        (await app.inject({ method: 'DELETE', url: '/api/products/product' })).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await app.inject({
+            method: 'DELETE',
+            url: '/api/products/product',
+            headers: { cookie: headers.cookie },
+          })
+        ).statusCode,
+      ).toBe(403);
+      for (let attempt = 0; attempt < 2; attempt++)
+        expect(
+          (await app.inject({ method: 'DELETE', url: '/api/products/product', headers }))
+            .statusCode,
+        ).toBe(200);
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/products', headers })).json().total,
+      ).toBe(0);
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/products/product',
+            headers,
+            payload: { active: true },
+          })
+        ).statusCode,
+      ).toBe(404);
+      await syncCatalog();
+      expect(
+        (await db.product.findUniqueOrThrow({ where: { slug: 'product' } })).archivedAt,
+      ).not.toBeNull();
+      expect(
+        (await browseCatalog({ search: '', provider: '', page: 1, limit: 25 })).data[0]!.imported,
+      ).toBe(false);
+      await expect(quoteProduct('product', 1)).rejects.toMatchObject({
+        code: 'PRODUCT_UNAVAILABLE',
+      });
+      await receive('oi');
+      expect(decrypt((await receive('1'))!.encryptedText)).not.toContain('1 - Gemini');
+      vi.spyOn(partner, 'createOrder').mockResolvedValue(external(order.id));
+      await processOrder(order.id);
+      await prepareDeliveries();
+      expect(
+        (
+          await db.order.findUniqueOrThrow({
+            where: { id: order.id },
+            include: { items: { include: { product: true } } },
+          })
+        ).items[0]!.product.slug,
+      ).toBe('product');
+      expect(await db.delivery.count({ where: { orderId: order.id } })).toBe(1);
+      expect(await db.auditLog.count({ where: { action: 'product.delete' } })).toBe(1);
+      expect(
+        (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+      ).toBe('90.00');
+    } finally {
+      await app.close();
+    }
+  });
+  it('reimporta produto excluído como rascunho mantendo textos e preço local', async () => {
+    await db.product.update({
+      where: { slug: 'product' },
+      data: { displayName: 'Minha oferta', description: 'Meu texto', manualPrice: '15' },
+    });
+    await archiveProduct('product', 'test-owner');
+    vi.spyOn(partner, 'products').mockResolvedValue({ data: [live] });
+    await importCatalog(['product'], 'test-owner');
+    const product = await db.product.findUniqueOrThrow({ where: { slug: 'product' } });
+    expect(product).toMatchObject({
+      archivedAt: null,
+      active: true,
+      visible: true,
+      authorizedResale: false,
+      displayName: 'Minha oferta',
+      description: 'Meu texto',
+    });
+    expect(product.manualPrice?.toFixed(2)).toBe('15.00');
+    await expect(quoteProduct('product', 1)).rejects.toMatchObject({ code: 'PRODUCT_UNAVAILABLE' });
+  });
+  it('usa apresentação local nos detalhes, resumo e histórico, sem publicar descrição externa', async () => {
+    await credit();
+    await saveSetting('bot.messageStyle', 'text');
+    vi.spyOn(partner, 'product').mockResolvedValue({
+      ...live,
+      name: 'Nome externo',
+      description: 'Descrição externa que não deve aparecer',
+    });
+    await db.product.update({
+      where: { slug: 'product' },
+      data: { displayName: 'Oferta personalizada', description: 'Minha descrição\nSegunda linha' },
+    });
+    await receive('oi');
+    await receive('1');
+    expect(decrypt((await receive('1'))!.encryptedText)).toContain('1 - Oferta personalizada');
+    const details = decrypt((await receive('1'))!.encryptedText);
+    expect(details).toContain('Oferta personalizada\nMinha descrição\nSegunda linha');
+    expect(details).not.toContain('Descrição externa');
+    expect(decrypt((await receive('1'))!.encryptedText)).toContain('Oferta personalizada');
+    await receive('1');
+    expect((await db.orderItem.findFirstOrThrow()).name).toBe('Oferta personalizada');
+    await db.product.update({ where: { slug: 'product' }, data: { description: null } });
+    await receive('menu');
+    await receive('1');
+    await receive('1');
+    expect(decrypt((await receive('1'))!.encryptedText)).not.toContain('Descrição externa');
+  });
+  it.each(['interactive', 'text'])(
+    'oferece adicionar saldo após saldo insuficiente em modo %s sem criar pedido ou débito',
+    async (style) => {
+      await saveSetting('bot.messageStyle', style);
+      await saveSetting('pix.gateway', 'expay');
+      await saveSetting('secret.expayApiKey', 'TEST-NOT-REAL', true);
+      const fetch = vi.fn(async (_url: unknown, options?: RequestInit) => {
+        const body = JSON.parse(String(options?.body));
+        return new Response(
+          JSON.stringify({
+            charge_id: randomUUID(),
+            reference: body.reference,
+            amount: body.amount,
+            currency: 'BRL',
+            payment_method: 'pix',
+            status: 'pending',
+            pix_data: { copy_paste: 'PIX-ONLY-TEST' },
+          }),
+          { status: 200 },
+        );
+      });
+      vi.stubGlobal('fetch', fetch);
+      await receive('oi');
+      await receive('1');
+      await receive('1');
+      await receive('1');
+      const summary = await receive('1');
+      const error = await receive('1');
+      expect(decrypt(error!.encryptedText)).toContain('3 - Adicionar saldo');
+      expect(await db.order.count()).toBe(0);
+      expect(await db.ledgerEntry.count()).toBe(0);
+      expect(fetch).not.toHaveBeenCalled();
+      let action = '3';
+      if (style === 'interactive') {
+        const previous = JSON.parse(decrypt(summary!.encryptedInteractive!));
+        expect(await receive(previous.buttons[0].id)).toBeNull();
+        const buttons = JSON.parse(decrypt(error!.encryptedInteractive!));
+        expect(buttons.buttons[0].title).toBe('💳 Adicionar saldo');
+        action = buttons.buttons[0].id;
+      } else expect(error!.encryptedInteractive).toBeNull();
+      expect(decrypt((await receive(action))!.encryptedText)).toContain('Quanto deseja adicionar');
+      await receive('25');
+      expect(await db.payment.count()).toBe(1);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect((await db.payment.findFirstOrThrow()).amountBrl.toFixed(2)).toBe('25.00');
+      expect(await db.order.count()).toBe(0);
+      expect(
+        (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+      ).toBe('0.00');
+    },
+  );
+});
+
 describe('Expay Brasil', () => {
   async function configured() {
     await saveSetting('pix.gateway', 'expay');

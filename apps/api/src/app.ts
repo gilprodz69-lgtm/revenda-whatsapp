@@ -12,7 +12,7 @@ import { hash, equalSecret, encrypt, decrypt } from './core/crypto.js';
 import { AppError } from './core/errors.js';
 import { authenticate, requirePermission, login } from './modules/auth.js';
 import { setting, saveSetting } from './core/settings.js';
-import { syncCatalog, browseCatalog, importCatalog } from './modules/catalog.js';
+import { syncCatalog, browseCatalog, importCatalog, archiveProduct } from './modules/catalog.js';
 import { adjustBalance } from './modules/wallet.js';
 import { refundOrder } from './modules/orders.js';
 import { refreshExchange } from './modules/exchange.js';
@@ -313,8 +313,10 @@ export async function buildApp() {
           .extend({ filter: z.enum(['available', 'unavailable', 'unauthorized', '']).default('') })
           .parse(request.query);
         const where = {
+          archivedAt: null,
           OR: [
             { name: { contains: q.search, mode: 'insensitive' as const } },
+            { displayName: { contains: q.search, mode: 'insensitive' as const } },
             { slug: { contains: q.search, mode: 'insensitive' as const } },
           ],
           ...(q.filter === 'available'
@@ -341,6 +343,8 @@ export async function buildApp() {
         return {
           data: data.map((p) => ({
             ...p,
+            supplierName: p.name,
+            name: p.displayName ?? p.name,
             quote: rate
               ? priceQuote(p.costUsd.toString(), p.bulkTiers as Tier[], 1, rate.usdBrl.toString(), {
                   markupPercent: p.markupPercent.toString(),
@@ -380,6 +384,11 @@ export async function buildApp() {
           .parse(request.body);
         return importCatalog(slugs, request.admin.id);
       });
+      admin.delete('/products/:slug', async (request) => {
+        requirePermission(request, 'configure');
+        const { slug } = z.object({ slug: z.string().min(1).max(255) }).parse(request.params);
+        return archiveProduct(slug, request.admin.id);
+      });
       admin.patch('/products/:slug', async (request) => {
         requirePermission(request, 'configure');
         const { slug } = z.object({ slug: z.string() }).parse(request.params);
@@ -387,6 +396,8 @@ export async function buildApp() {
           .object({
             active: z.boolean().optional(),
             visible: z.boolean().optional(),
+            displayName: z.string().trim().min(1).max(150).nullable().optional(),
+            description: z.string().trim().max(2500).nullable().optional(),
             authorizedResale: z.boolean().optional(),
             markupPercent: money.refine((v) => new Prisma.Decimal(v).lte(1000)).optional(),
             fixedMargin: money.optional(),
@@ -401,7 +412,7 @@ export async function buildApp() {
           .parse(request.body);
         return transaction(async (tx) => {
           const product = await tx.product.update({
-            where: { slug },
+            where: { slug, archivedAt: null },
             data: {
               ...data,
               promoUntil:
@@ -761,6 +772,7 @@ export async function buildApp() {
         'bot.greetings',
         'bot.activationKeywords',
         'bot.messageStyle',
+        'bot.mainMenuStyle',
         'pix.gateway',
         'pix.expayStoreId',
       ];
@@ -776,11 +788,13 @@ export async function buildApp() {
                     key,
                     key === 'bot.messageStyle'
                       ? 'interactive'
-                      : key === 'pix.gateway'
-                        ? env.PIX_GATEWAY
-                        : key === 'pix.expayStoreId'
-                          ? env.EXPAY_STORE_ID
-                          : null,
+                      : key === 'bot.mainMenuStyle'
+                        ? 'buttons'
+                        : key === 'pix.gateway'
+                          ? env.PIX_GATEWAY
+                          : key === 'pix.expayStoreId'
+                            ? env.EXPAY_STORE_ID
+                            : null,
                   ),
             ]),
           ),
@@ -828,6 +842,7 @@ export async function buildApp() {
           'messages.welcome': z.string().min(1).max(3000).transform(validateTemplate),
           'bot.greetings': z.array(z.string().min(1).max(30)).max(20),
           'bot.messageStyle': z.enum(['interactive', 'text']),
+          'bot.mainMenuStyle': z.enum(['buttons', 'list']),
           'bot.activationKeywords': z
             .array(
               z

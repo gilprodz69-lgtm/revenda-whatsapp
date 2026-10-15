@@ -22,8 +22,8 @@ No painel:
 
 1. Configure a chave da Partner API e os limites do seu plano. O saldo do fornecedor é em USD e precisa ser financiado na conta Telegram do fornecedor.
 2. Escolha cotação manual real ou BCB/PTAX; sem cotação válida, vendas ficam bloqueadas.
-3. Em **Produtos → Importar serviços**, escolha os produtos da Partner e clique em **Importar selecionados**. Depois defina os preços e confirme a autorização de revenda em **Editar → Disponibilidade**. **Sincronizar importados** atualiza estoque e custo dos produtos escolhidos sem adicionar outros automaticamente.
-4. Na aba WhatsApp, conclua **Iniciar ativação → Abrir cadastro oficial → Confirmar ativação** da Evolution. Depois crie/conecte a instância pelo QR Code ou pareamento. Instâncias existentes são preservadas. Em Configurações, escolha **Menu em lista e botões de confirmação** para o atendimento interativo e defina as palavras-chave de ativação.
+3. Em **Produtos → Importar serviços**, escolha os produtos da Partner e clique em **Importar selecionados**. Em **Editar → Apresentação**, personalize nome e descrição; em **Preços**, defina o valor; em **Disponibilidade**, autorize a revenda. **Sincronizar importados** mantém textos e regras locais. **Excluir** retira o produto do catálogo, preservando pedidos e entregas.
+4. Na aba WhatsApp, conclua **Iniciar ativação → Abrir cadastro oficial → Confirmar ativação** da Evolution. Depois crie/conecte a instância pelo QR Code ou pareamento. Instâncias existentes são preservadas. Em Configurações, escolha **Botões e listas**, defina as palavras-chave e selecione o menu principal com três botões visíveis ou uma lista completa. Categorias e produtos usam listas.
 5. Para depósitos, confira **Expay Brasil** e a chave da API atual em Configurações. Se sua operação exigir, informe o ID da loja. Configure na loja Expay o webhook `https://SEU_DOMINIO/webhooks/pix/expay`. O sistema também consulta as cobranças automaticamente e só credita saldo após confirmação autenticada de valor, referência, moeda e método.
 6. Execute os critérios de [homologação](docs/HOMOLOGACAO.md) antes de abrir vendas.
 

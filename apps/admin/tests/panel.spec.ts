@@ -17,6 +17,8 @@ const dashboard = {
 async function mockApi(page: Page, loggedIn = true) {
   const settings: Record<string, unknown> = {};
   const secrets: Record<string, boolean> = {};
+  let productDeleted = false;
+  let productEdits: Record<string, unknown> = {};
   let rates: Record<string, unknown>[] = [];
   const refreshRate = () => {
     rates = [
@@ -79,30 +81,41 @@ async function mockApi(page: Page, loggedIn = true) {
       const slugs = req.postDataJSON().slugs as string[];
       slugs.forEach((slug) => imported.add(slug));
       body = { imported: slugs.length, syncedAt: new Date().toISOString() };
+    } else if (url.pathname === '/api/products/authorized-product' && req.method() === 'DELETE') {
+      productDeleted = true;
+      body = { slug: 'authorized-product', archived: true };
+    } else if (url.pathname === '/api/products/authorized-product' && req.method() === 'PATCH') {
+      productEdits = { ...productEdits, ...req.postDataJSON() };
+      body = productEdits;
     } else if (url.pathname === '/api/products' && req.method() === 'GET')
       body = {
-        data: [
-          {
-            slug: 'authorized-product',
-            name: 'Assinatura autorizada',
-            provider: { name: 'Fornecedor' },
-            costUsd: '5.00',
-            catalogPriceUsd: '6.00',
-            stock: 10,
-            maxQuantity: 10,
-            available: true,
-            active: true,
-            visible: true,
-            authorizedResale: true,
-            markupPercent: '30',
-            fixedMargin: '0',
-            roundingStep: '0.01',
-            volumeDiscountPercent: '0',
-            volumeMinQuantity: 10,
-            quote: { unitSaleBrl: '34.45', estimatedProfitBrl: '7.95' },
-          },
-        ],
-        total: 1,
+        data: productDeleted
+          ? []
+          : [
+              {
+                slug: 'authorized-product',
+                name: 'Assinatura autorizada',
+                provider: { name: 'Fornecedor' },
+                costUsd: '5.00',
+                catalogPriceUsd: '6.00',
+                stock: 10,
+                maxQuantity: 10,
+                available: true,
+                active: true,
+                visible: true,
+                authorizedResale: true,
+                markupPercent: '30',
+                fixedMargin: '0',
+                roundingStep: '0.01',
+                volumeDiscountPercent: '0',
+                volumeMinQuantity: 10,
+                quote: { unitSaleBrl: '34.45', estimatedProfitBrl: '7.95' },
+                ...productEdits,
+                supplierName: 'Assinatura autorizada',
+                name: productEdits.displayName ?? 'Assinatura autorizada',
+              },
+            ],
+        total: productDeleted ? 0 : 1,
       };
     else if (url.pathname === '/api/settings') {
       if (req.method() === 'PUT') {
@@ -244,6 +257,108 @@ test('edita regras de produto com valores financeiros em strings', async ({ page
     authorizedResale: true,
   });
   await expect(page.getByRole('dialog')).not.toBeVisible();
+});
+
+test('edita nome e descrição, mantém entre abas e recarrega os textos salvos', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await page.getByRole('tab', { name: 'Apresentação', exact: true }).click();
+  await page.getByLabel('Nome na loja', { exact: true }).fill('Gemini da NeverzShop');
+  await page
+    .getByLabel('Descrição no WhatsApp', { exact: true })
+    .fill('Plano da loja.\nInstruções em português.');
+  await page.getByRole('tab', { name: 'Preços', exact: true }).click();
+  await page.getByRole('tab', { name: 'Apresentação', exact: true }).click();
+  await expect(page.getByLabel('Nome na loja', { exact: true })).toHaveValue(
+    'Gemini da NeverzShop',
+  );
+  await page.screenshot({
+    path: `test-results/product-presentation-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+  const mutation = page.waitForRequest(
+    (req) => req.method() === 'PATCH' && req.url().endsWith('/products/authorized-product'),
+  );
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  expect((await mutation).postDataJSON()).toMatchObject({
+    displayName: 'Gemini da NeverzShop',
+    description: 'Plano da loja.\nInstruções em português.',
+  });
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.reload();
+  await navigate(page, 'Produtos');
+  await expect(page.getByText('Gemini da NeverzShop', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await page.getByRole('tab', { name: 'Apresentação', exact: true }).click();
+  await expect(page.getByLabel('Descrição no WhatsApp', { exact: true })).toHaveValue(
+    'Plano da loja.\nInstruções em português.',
+  );
+  await page.getByLabel('Nome na loja', { exact: true }).fill('');
+  await page.getByLabel('Descrição no WhatsApp', { exact: true }).fill('');
+  const reset = page.waitForRequest(
+    (req) => req.method() === 'PATCH' && req.url().endsWith('/products/authorized-product'),
+  );
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  expect((await reset).postDataJSON()).toMatchObject({ displayName: null, description: null });
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.getByText('Assinatura autorizada', { exact: true })).toBeVisible();
+});
+
+test('exclui produto somente após confirmar e atualiza a lista', async ({ page }) => {
+  await mockApi(page);
+  const deletions: string[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'DELETE') deletions.push(req.url());
+  });
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  const button = page.getByRole('button', { name: 'Excluir Assinatura autorizada', exact: true });
+  await button.click();
+  const dialog = page.getByRole('dialog', { name: 'Excluir produto', exact: true });
+  await expect(dialog.getByText('Assinatura autorizada', { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText(/Pedidos existentes, entregas e histórico serão preservados/),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  expect(deletions).toHaveLength(0);
+  await expect(button).toBeVisible();
+  await button.click();
+  await page.screenshot({
+    path: `test-results/product-delete-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await dialog.getByRole('button', { name: 'Excluir produto', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText('Nenhum registro encontrado')).toBeVisible();
+  expect(deletions).toHaveLength(1);
+});
+
+test('erro ao excluir mantém produto e permite tentar novamente', async ({ page }) => {
+  await mockApi(page);
+  let failed = true;
+  await page.route('**/api/products/authorized-product', async (route) => {
+    if (!failed || route.request().method() !== 'DELETE') return route.fallback();
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Não foi possível excluir agora.' }),
+    });
+  });
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Excluir Assinatura autorizada', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Excluir produto', exact: true });
+  await dialog.getByRole('button', { name: 'Excluir produto', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Não foi possível excluir agora.');
+  await expect(dialog.getByRole('button', { name: 'Excluir produto', exact: true })).toBeEnabled();
+  failed = false;
+  await dialog.getByRole('button', { name: 'Excluir produto', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText('Nenhum registro encontrado')).toBeVisible();
 });
 
 test('escolhe serviços da Partner com busca, paginação e seleção preservada', async ({ page }) => {
@@ -396,6 +511,9 @@ test('salva palavras de ativação no admin e mantém após recarregar', async (
   await navigate(page, 'Configurações');
   const field = page.getByLabel('Palavras-chave para iniciar o bot');
   await field.fill('comprar, quero comprar, vendas');
+  const mainMenu = page.getByRole('combobox', { name: 'Menu principal', exact: true });
+  await expect(mainMenu).toHaveValue('buttons');
+  await mainMenu.selectOption('list');
   const mutation = page.waitForRequest(
     (req) => req.method() === 'PUT' && req.url().endsWith('/settings'),
   );
@@ -406,9 +524,11 @@ test('salva palavras de ativação no admin e mantém após recarregar', async (
     'vendas',
   ]);
   expect((await mutation).postDataJSON()['bot.messageStyle']).toBe('interactive');
+  expect((await mutation).postDataJSON()['bot.mainMenuStyle']).toBe('list');
   await page.reload();
   await navigate(page, 'Configurações');
   await expect(field).toHaveValue('comprar, quero comprar, vendas');
+  await expect(mainMenu).toHaveValue('list');
 });
 
 test('abre a seção que contém um campo obrigatório inválido antes de salvar', async ({ page }) => {

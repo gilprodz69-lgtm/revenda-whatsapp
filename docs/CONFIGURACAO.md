@@ -18,7 +18,11 @@ O catálogo real pode misturar **USD e USDT**, embora o exemplo do HTML informe 
 
 Limites em `.env`: `PARTNER_REQUESTS_PER_MINUTE` e `PARTNER_ORDERS_PER_MINUTE`. Planos documentados: limited 10/2, standard 60/10, premium 300/50. As contagens são compartilhadas somente entre os processos desta instalação; outras aplicações com a mesma chave também consomem o limite do fornecedor. Prefira uma chave própria para esta instalação.
 
-Produtos entram com `authorizedResale=false`. O proprietário precisa conferir origem e autorização, além de definir preço/margem e visibilidade. Isso evita oferecer credenciais não autorizadas por padrão. O catálogo pode conter descrição HTML: o bot remove tags, e o painel não renderiza HTML recebido como markup.
+Produtos entram com `authorizedResale=false`. O proprietário precisa conferir origem e autorização, além de definir preço/margem e visibilidade. Em **Editar → Apresentação**, `displayName` define o nome na loja (vazio usa o nome do fornecedor) e `description` define a descrição enviada no WhatsApp (vazia não exibe descrição). Ambos são locais e sobrevivem à sincronização. O bot não envia automaticamente a descrição externa e remove tags da descrição local; o painel não renderiza HTML como markup.
+
+Excluir um produto preenche `archivedAt` e desativa a listagem, sem remover os registros associados a pedidos. Apenas uma importação explícita restaura o serviço, como rascunho não autorizado. A migração 202610150005 adiciona as colunas opcionais `archivedAt` e `displayName`; não remove dados existentes.
+
+O modo `bot.messageStyle=interactive` usa `bot.mainMenuStyle=buttons` por padrão: três ações visíveis no menu inicial e listas para categorias/produtos/carteira. `bot.mainMenuStyle=list` mantém as seis ações na lista inicial. `text` mantém a navegação por números. O aplicativo do WhatsApp controla a rolagem e a abertura de listas.
 
 ## Pix
 

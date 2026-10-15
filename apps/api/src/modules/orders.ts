@@ -12,7 +12,7 @@ import { messageTemplate } from './templates.js';
 
 export async function quoteProduct(slug: string, quantity: number) {
   const local = await db.product.findUniqueOrThrow({ where: { slug } });
-  if (!local.active || !local.visible || !local.authorizedResale)
+  if (local.archivedAt || !local.active || !local.visible || !local.authorizedResale)
     throw new AppError('PRODUCT_UNAVAILABLE', 'Este produto não está disponível para venda.');
   const live = await partner.product(slug);
   if (live.currency !== 'USD')
@@ -40,7 +40,13 @@ export async function quoteProduct(slug: string, quantity: number) {
     rate.usdBrl.toString(),
     rule,
   );
-  return { product: local, live, rate, quantity, ...quote };
+  return {
+    product: { ...local, name: local.displayName ?? local.name },
+    live,
+    rate,
+    quantity,
+    ...quote,
+  };
 }
 export async function placeOrder(input: {
   customerId: string;
@@ -92,7 +98,7 @@ export async function placeOrder(input: {
     const customer = await tx.customer.findUniqueOrThrow({ where: { id: input.customerId } });
     if (customer.blocked) throw new AppError('CUSTOMER_BLOCKED', 'Conta bloqueada para compras.');
     const local = await tx.product.findUniqueOrThrow({ where: { slug: input.slug } });
-    if (!local.active || !local.visible || !local.authorizedResale)
+    if (local.archivedAt || !local.active || !local.visible || !local.authorizedResale)
       throw new AppError('PRODUCT_UNAVAILABLE', 'Produto desativado.');
     const order = await tx.order.create({
       data: {

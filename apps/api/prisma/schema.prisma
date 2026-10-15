@@ -103,6 +103,7 @@ model Product {
   code String?
   name String
   providerKey String
+  displayName String?
   provider Provider @relation(fields: [providerKey], references: [key])
   catalogPriceUsd Decimal @db.Decimal(18, 4)
   costUsd Decimal @db.Decimal(18, 4)
@@ -119,6 +120,7 @@ model Product {
   active Boolean @default(true)
   visible Boolean @default(true)
   authorizedResale Boolean @default(false)
+  archivedAt DateTime?
   markupPercent Decimal @default(30) @db.Decimal(10, 4)
   fixedMargin Decimal @default(0) @db.Decimal(18, 2)
   manualPrice Decimal? @db.Decimal(18, 2)
@@ -129,6 +131,7 @@ model Product {
   volumeMinQuantity Int @default(10)
   items OrderItem[]
   @@index([providerKey, available, active])
+  @@index([archivedAt])
 }
 model ExchangeRate {
   id String @id @default(uuid())

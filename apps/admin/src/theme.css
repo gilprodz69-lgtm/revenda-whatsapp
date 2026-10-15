@@ -931,6 +931,22 @@ body.modal-open .shell > .workspace {
   border: 1px solid var(--line);
   border-radius: 14px;
 }
+.product-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.danger-action {
+  color: var(--danger);
+}
+.primary.delete-product-confirm {
+  background: #b92e43;
+  border-color: #d7475d;
+  color: #fff;
+}
+.primary.delete-product-confirm:hover {
+  background: #a32337;
+}
 .editor-error {
   flex-shrink: 0;
   padding: 14px 28px;

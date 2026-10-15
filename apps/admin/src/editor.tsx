@@ -116,6 +116,7 @@ const tabs = [
   { label: 'Preços', icon: Wallet },
   { label: 'Promoções', icon: Tags },
   { label: 'Disponibilidade', icon: Eye },
+  { label: 'Apresentação', icon: Package },
 ];
 function ProductField({
   label,
@@ -214,6 +215,48 @@ export function ProductFields({ row }: { row: Row }) {
         </div>
       </aside>
       <div className="editor-scroll">
+        <section
+          role="tabpanel"
+          id={`${id}-panel-3`}
+          aria-labelledby={`${id}-tab-3`}
+          hidden={selected !== 3}
+          data-editor-section="3"
+        >
+          <h3>Apresentação na loja</h3>
+          <p className="editor-section-description">
+            Estes textos aparecem no WhatsApp e são mantidos ao sincronizar o fornecedor.
+          </p>
+          <div className="stack">
+            <label className="field">
+              <span id={`${id}-name-label`}>Nome na loja</span>
+              <input
+                name="displayName"
+                aria-labelledby={`${id}-name-label`}
+                aria-describedby={`${id}-name-help`}
+                defaultValue={row.displayName ?? ''}
+                maxLength={150}
+                placeholder={row.supplierName ?? row.name}
+                autoComplete="off"
+              />
+              <small id={`${id}-name-help`}>Deixe vazio para usar o nome do fornecedor.</small>
+            </label>
+            <label className="field">
+              <span id={`${id}-description-label`}>Descrição no WhatsApp</span>
+              <textarea
+                name="description"
+                aria-labelledby={`${id}-description-label`}
+                aria-describedby={`${id}-description-help`}
+                defaultValue={row.description ?? ''}
+                maxLength={2500}
+                rows={8}
+                placeholder="Escreva a descrição que seus clientes vão receber."
+              />
+              <small id={`${id}-description-help`}>
+                Até 2.500 caracteres. A descrição do fornecedor não é enviada automaticamente.
+              </small>
+            </label>
+          </div>
+        </section>
         <section
           role="tabpanel"
           id={`${id}-panel-0`}

@@ -26,6 +26,7 @@ import {
   LoaderCircle,
   Plus,
   Download,
+  Trash2,
 } from 'lucide-react';
 import { api, HttpError, type Row } from './api';
 import './style.css';
@@ -298,6 +299,8 @@ function App() {
         const payload: Row = {
           active: f.has('active'),
           visible: f.has('visible'),
+          displayName: get('displayName').trim() || null,
+          description: get('description').trim() || null,
           authorizedResale: f.has('authorizedResale'),
           markupPercent: get('markupPercent'),
           fixedMargin: get('fixedMargin'),
@@ -310,6 +313,13 @@ function App() {
         };
         await act(`/products/${encodeURIComponent(row.slug)}`, 'PATCH', payload);
       }
+      if (type === 'deleteProduct' && row)
+        await act(
+          `/products/${encodeURIComponent(row.slug)}`,
+          'DELETE',
+          undefined,
+          'Produto excluído do catálogo. Histórico de pedidos preservado.',
+        );
       if (type === 'balance' && row)
         await act(`/customers/${row.id}/balance`, 'POST', {
           amount: get('amount'),
@@ -865,9 +875,18 @@ function App() {
                               </td>
                               <td>
                                 {canConfigure && (
-                                  <button className="text-btn" onClick={() => open('product', r)}>
-                                    Editar <ChevronRight size={15} />
-                                  </button>
+                                  <div className="product-actions">
+                                    <button className="text-btn" onClick={() => open('product', r)}>
+                                      Editar <ChevronRight size={15} />
+                                    </button>
+                                    <button
+                                      className="text-btn danger-action"
+                                      onClick={() => open('deleteProduct', r)}
+                                      aria-label={`Excluir ${r.name}`}
+                                    >
+                                      <Trash2 size={15} /> Excluir
+                                    </button>
+                                  </div>
                                 )}
                               </td>
                             </>
@@ -1076,6 +1095,7 @@ function App() {
                                 'human.hours': f.get('hours'),
                                 'messages.welcome': f.get('welcome'),
                                 'bot.messageStyle': f.get('messageStyle'),
+                                'bot.mainMenuStyle': f.get('mainMenuStyle'),
                                 'bot.activationKeywords': String(f.get('activationKeywords') ?? '')
                                   .split(/[,\n]/)
                                   .map((v) => v.trim())
@@ -1117,16 +1137,27 @@ function App() {
                               name="messageStyle"
                               defaultValue={data.values['bot.messageStyle'] ?? 'interactive'}
                             >
-                              <option value="interactive">
-                                Menu em lista e botões de confirmação
-                              </option>
+                              <option value="interactive">Botões e listas</option>
                               <option value="text">Menu em texto</option>
                             </select>
                           </Field>
+                          <Field name="mainMenuStyle" label="Menu principal">
+                            <select
+                              name="mainMenuStyle"
+                              defaultValue={data.values['bot.mainMenuStyle'] ?? 'buttons'}
+                            >
+                              <option value="buttons">
+                                Três botões visíveis: comprar, saldo e suporte
+                              </option>
+                              <option value="list">Lista com todas as opções</option>
+                            </select>
+                          </Field>
                           <small>
-                            Menu principal, carteira, categorias e produtos em listas. Botões para
-                            confirmar a compra. A exibição depende da Evolution e do WhatsApp; se a
-                            API rejeitar o formato, o atendimento continua em texto.
+                            Ao digitar menu, o bot envia uma nova mensagem com as ações escolhidas.
+                            Em Meu saldo ficam adicionar saldo, pedidos e conta. Categorias e
+                            produtos usam listas que o cliente abre ao tocar. A rolagem e a
+                            aparência são controladas pelo WhatsApp. Se a API rejeitar o formato, o
+                            atendimento continua em texto.
                           </small>
                           <small className="muted">
                             Separe palavras ou frases por vírgula. O bot inicia somente no privado
@@ -1571,6 +1602,7 @@ function App() {
                 (
                   {
                     product: 'Regras de venda',
+                    deleteProduct: 'Excluir produto',
                     customer: 'Cliente',
                     order: 'Detalhes do pedido',
                     balance: 'Ajuste de carteira',
@@ -1586,21 +1618,25 @@ function App() {
               }
               description={
                 modal.type === 'product'
-                  ? 'Personalize preços, ofertas e disponibilidade do produto.'
-                  : modal.type === 'connect'
-                    ? 'Conecte o número da sua loja ao atendimento.'
-                    : 'Consulte os detalhes e gerencie sua operação.'
+                  ? 'Personalize nome, descrição, preços e disponibilidade do produto.'
+                  : modal.type === 'deleteProduct'
+                    ? 'Confirme a remoção deste serviço do catálogo da loja.'
+                    : modal.type === 'connect'
+                      ? 'Conecte o número da sua loja ao atendimento.'
+                      : 'Consulte os detalhes e gerencie sua operação.'
               }
               icon={
-                modal.type === 'product'
-                  ? Package
-                  : ['customer', 'admin', 'editAdmin'].includes(modal.type)
-                    ? Users
-                    : ['instance', 'connect'].includes(modal.type)
-                      ? MessageCircle
-                      : ['balance', 'rate', 'refund'].includes(modal.type)
-                        ? Wallet
-                        : ShoppingBag
+                modal.type === 'deleteProduct'
+                  ? Trash2
+                  : modal.type === 'product'
+                    ? Package
+                    : ['customer', 'admin', 'editAdmin'].includes(modal.type)
+                      ? Users
+                      : ['instance', 'connect'].includes(modal.type)
+                        ? MessageCircle
+                        : ['balance', 'rate', 'refund'].includes(modal.type)
+                          ? Wallet
+                          : ShoppingBag
               }
               wide={modal.type === 'product'}
               onClose={() => setModal(null)}
@@ -1893,6 +1929,19 @@ function App() {
                     className={modal.type === 'product' ? 'product-body' : 'editor-scroll stack'}
                   >
                     {modal.type === 'product' && <ProductFields row={modal.row!} />}
+                    {modal.type === 'deleteProduct' && (
+                      <>
+                        <h3>{modal.row?.name}</h3>
+                        <p>
+                          O produto será removido da lista do admin e deixará de aparecer para novas
+                          compras no WhatsApp.
+                        </p>
+                        <div className="permission-box">
+                          Pedidos existentes, entregas e histórico serão preservados. Se precisar,
+                          você poderá importar este serviço novamente.
+                        </div>
+                      </>
+                    )}
                     {modal.type === 'balance' && (
                       <>
                         <p>
@@ -1977,7 +2026,13 @@ function App() {
                   </div>
                   <div className="modal-actions">
                     <small>
-                      <span className="required-mark">*</span> Campos obrigatórios
+                      {modal.type === 'deleteProduct' ? (
+                        'Confira o produto antes de confirmar.'
+                      ) : (
+                        <>
+                          <span className="required-mark">*</span> Campos obrigatórios
+                        </>
+                      )}
                     </small>
                     <button
                       className="secondary"
@@ -1987,8 +2042,21 @@ function App() {
                     >
                       Cancelar
                     </button>
-                    <button className="primary" disabled={busy}>
-                      {busy ? 'Salvando…' : 'Salvar'}
+                    <button
+                      className={
+                        modal.type === 'deleteProduct'
+                          ? 'primary delete-product-confirm'
+                          : 'primary'
+                      }
+                      disabled={busy}
+                    >
+                      {modal.type === 'deleteProduct'
+                        ? busy
+                          ? 'Excluindo…'
+                          : 'Excluir produto'
+                        : busy
+                          ? 'Salvando…'
+                          : 'Salvar'}
                     </button>
                   </div>
                 </form>

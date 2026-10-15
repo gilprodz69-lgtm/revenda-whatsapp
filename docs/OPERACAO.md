@@ -2,6 +2,14 @@
 
 ## Importar serviços
 
+Em **Produtos → Editar → Apresentação**, defina o **Nome na loja** e a **Descrição no WhatsApp**. A descrição é escrita pelo lojista (até 2.500 caracteres); o bot não publica automaticamente a descrição do fornecedor. Nome vazio usa o nome do fornecedor, e descrição vazia não adiciona texto descritivo. A sincronização mantém os textos personalizados e atualiza somente os dados do fornecedor. Detalhes, resumo de compra e novos pedidos usam o nome da loja; pedidos anteriores conservam seu próprio registro.
+
+O botão **Excluir** abre uma confirmação com o nome do produto. A exclusão retira o serviço do admin e das novas compras no WhatsApp, preservando pedidos, entregas e movimentações existentes. Sincronizar não restaura produtos excluídos. Para voltar a oferecê-lo, use **Importar serviços**: os textos e preços anteriores são mantidos, mas a autorização de revenda precisa ser conferida novamente.
+
+Em **Configurações → Menu principal**, escolha três botões visíveis (padrão: Comprar serviços, Meu saldo e Suporte) ou uma lista com as seis opções. **Meu saldo** oferece adicionar saldo, pedidos e conta. Categorias e produtos continuam em listas. Digitar `menu` envia uma nova mensagem e invalida os botões antigos. A aplicação não controla a rolagem da conversa nem abre automaticamente a lista no aparelho; essas ações pertencem ao WhatsApp. A exibição depende da Evolution/WhatsApp. [Referência dos formatos interativos do WhatsApp](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/api-reference/messages/interactive/).
+
+Se a confirmação da compra encontrar saldo insuficiente na carteira do cliente, o bot apresenta **Adicionar saldo** e **Menu principal**, com alternativa numérica no modo texto. Adicionar saldo abre o fluxo de depósito Pix; não cria pedido nem debita a carteira. Após a confirmação do pagamento, o cliente inicia e confirma a compra novamente com preço e estoque atualizados.
+
 Em **Produtos → Importar serviços**, consulte o catálogo da Partner, pesquise por nome/código/slug e filtre o fornecedor. Marque os serviços desejados e clique em **Importar selecionados**. A janela mostra custo na moeda original, estoque e indicação dos serviços já importados. Você pode revisar a seleção e remover itens antes de importar; ela é mantida entre páginas e filtros. São até 100 serviços por operação.
 
 Esta versão permite importar somente serviços em **USD**. Produtos em **USDT** são exibidos com a moeda correta e o aviso **Moeda sem suporte para importação**, sem impedir a consulta/importação dos serviços USD. A seleção de página também exclui itens sem suporte. A aplicação não presume paridade USD/USDT; o suporte à venda em outra moeda exige conversão e contabilização próprias.

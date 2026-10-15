@@ -191,6 +191,14 @@ export async function processIncoming(eventId: string) {
     };
     const mainMenu = async () => {
       const text = await messageTemplate('welcome', { nome: customer.name, loja: store });
+      if (rich && (await setting('bot.mainMenuStyle', 'buttons')) === 'buttons') {
+        choices('buttons', text, [
+          { value: '1', title: '🛒 Comprar serviços' },
+          { value: '2', title: '💰 Meu saldo' },
+          { value: '5', title: '🎧 Suporte' },
+        ]);
+        return text;
+      }
       choices(
         'list',
         text,
@@ -232,6 +240,7 @@ export async function processIncoming(eventId: string) {
         where: {
           products: {
             some: {
+              archivedAt: null,
               available: true,
               active: true,
               visible: true,
@@ -273,6 +282,7 @@ export async function processIncoming(eventId: string) {
       const products = await db.product.findMany({
         where: {
           providerKey: provider,
+          archivedAt: null,
           active: true,
           available: true,
           visible: true,
@@ -291,7 +301,7 @@ export async function processIncoming(eventId: string) {
       };
       const text = `${await messageTemplate('products')}\n${products
         .slice(0, 8)
-        .map((p, i) => `${i + 1} - ${p.name}`)
+        .map((p, i) => `${i + 1} - ${p.displayName ?? p.name}`)
         .join(
           '\n',
         )}\n${products.length > 8 ? '9 - Mais produtos\n' : ''}\nVoltar - Categorias\n0 - Menu`;
@@ -301,7 +311,7 @@ export async function processIncoming(eventId: string) {
         [
           ...products.slice(0, 8).map((p, i) => ({
             value: String(i + 1),
-            title: p.name,
+            title: p.displayName ?? p.name,
             description: `Estoque: ${p.stock} · Máximo: ${p.maxQuantity}`,
           })),
           ...(products.length > 8
@@ -398,7 +408,7 @@ export async function processIncoming(eventId: string) {
           else {
             const quote = await quoteProduct(slug, 1);
             state = { step: 'QUANTITY', slug, provider: state.provider };
-            response = `${quote.live.name}\n${(quote.live.description ?? '').replace(/<[^>]*>/g, '')}\nPreço unitário: R$ ${quote.unitSaleBrl}\nDuração: ${quote.live.durationDays ?? 'Não informada'} dias\nGarantia: ${quote.live.warranty?.enabled ? (quote.live.warranty.days ?? 'Consultar suporte') : 0} dias\nMáximo: ${quote.live.stock.maxQuantity}\n\n${await messageTemplate('quantity')}\nVoltar - Produtos\n0 - Cancelar`;
+            response = `${quote.product.name}\n${(quote.product.description ?? '').replace(/<[^>]*>/g, '')}\nPreço unitário: R$ ${quote.unitSaleBrl}\nDuração: ${quote.live.durationDays ?? 'Não informada'} dias\nGarantia: ${quote.live.warranty?.enabled ? (quote.live.warranty.days ?? 'Consultar suporte') : 0} dias\nMáximo: ${quote.live.stock.maxQuantity}\n\n${await messageTemplate('quantity')}\nVoltar - Produtos\n0 - Cancelar`;
             choices(
               'buttons',
               response,
@@ -418,7 +428,7 @@ export async function processIncoming(eventId: string) {
           total: quote.totalBrl,
           quoteExpires: Date.now() + 5 * 60000,
         };
-        response = `${await messageTemplate('summary', { produto: quote.live.name, valor: quote.totalBrl })}\nQuantidade: ${quantity}\n\n1 - Confirmar usando saldo da carteira\n0 - Cancelar\nO preço será conferido novamente ao confirmar.`;
+        response = `${await messageTemplate('summary', { produto: quote.product.name, valor: quote.totalBrl })}\nQuantidade: ${quantity}\n\n1 - Confirmar usando saldo da carteira\n0 - Cancelar\nO preço será conferido novamente ao confirmar.`;
         choices('buttons', response, [
           { value: '1', title: '✅ Confirmar compra' },
           { value: '0', title: 'Cancelar' },
@@ -482,6 +492,14 @@ export async function processIncoming(eventId: string) {
       else throw e;
       if (e instanceof AppError && ['PRICE_CHANGED', 'OUT_OF_STOCK'].includes(e.code))
         state = { step: 'MENU' };
+      if (e instanceof AppError && e.code === 'LOCAL_INSUFFICIENT_BALANCE') {
+        state = { step: 'MENU' };
+        response = `${e.message}\nAdicione saldo por Pix para continuar comprando.\n\n3 - Adicionar saldo\n0 - Menu`;
+        choices('buttons', response, [
+          { value: '3', title: '💳 Adicionar saldo' },
+          { value: '0', title: 'Menu principal' },
+        ]);
+      }
     }
     if (
       response &&
