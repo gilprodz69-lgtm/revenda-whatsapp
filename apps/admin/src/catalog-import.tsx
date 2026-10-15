@@ -10,7 +10,9 @@ type Service = {
   name: string;
   code?: string;
   provider: { key: string; name: string };
-  costUsd: string;
+  cost: string;
+  currency: string;
+  canImport: boolean;
   stock: number;
   available: boolean;
   imported: boolean;
@@ -77,7 +79,7 @@ export function CatalogImport({
       active = false;
     };
   }, [query, provider, page, reload, onError]);
-  const available = catalog?.data.filter((service) => !service.imported) ?? [];
+  const available = catalog?.data.filter((service) => !service.imported && service.canImport) ?? [];
   const allSelected =
     available.length > 0 && available.every((service) => selected.has(service.slug));
   const pages = Math.max(1, Math.ceil((catalog?.total ?? 0) / 25));
@@ -210,6 +212,7 @@ export function CatalogImport({
                   disabled={
                     busy ||
                     service.imported ||
+                    !service.canImport ||
                     (!selected.has(service.slug) && selected.size >= 100)
                   }
                   onChange={(e) => {
@@ -230,13 +233,18 @@ export function CatalogImport({
                   </small>
                 </span>
                 <span className="import-service-cost">
-                  <b>US$ {new Decimal(service.costUsd).toFixed(2).replace('.', ',')}</b>
+                  <b>
+                    {service.currency === 'USD' ? 'US$' : service.currency}{' '}
+                    {new Decimal(service.cost).toFixed(2).replace('.', ',')}
+                  </b>
                   <small>
-                    {service.imported
-                      ? 'Já importado'
-                      : service.available
-                        ? `${service.stock} em estoque`
-                        : 'Sem estoque'}
+                    {!service.canImport
+                      ? 'Moeda sem suporte para importação'
+                      : service.imported
+                        ? 'Já importado'
+                        : service.available
+                          ? `${service.stock} em estoque`
+                          : 'Sem estoque'}
                   </small>
                 </span>
               </label>
@@ -292,7 +300,9 @@ export function CatalogImport({
         )}
         <p className="import-help">
           Os serviços serão adicionados para revisão. Depois de importar, defina o preço e autorize
-          a revenda em Editar → Disponibilidade. Até 100 serviços por importação.
+          a revenda em Editar → Disponibilidade. Até 100 serviços por importação. A importação nesta
+          versão suporta USD. Serviços em USDT ou outras moedas são exibidos com a moeda original e
+          ficam indisponíveis para seleção.
         </p>
       </div>
     </EditorDialog>

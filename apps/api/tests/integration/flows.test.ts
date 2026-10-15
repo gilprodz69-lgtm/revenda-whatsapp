@@ -781,6 +781,64 @@ describe('Importação seletiva do catálogo', () => {
     name: 'Novo serviço',
     productCode: 'NEW-43',
   };
+  it('mostra catálogo USD/USDT, importa USD e recusa conversão implícita em seleção mista', async () => {
+    const usdt = { ...remote, id: 44, slug: 'usdt-service', currency: 'USDT' };
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ data: [live, remote, usdt] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const preview = await browseCatalog({ search: '', provider: '', page: 1, limit: 25 });
+    expect(preview.total).toBe(3);
+    expect(preview.data.find((p) => p.slug === usdt.slug)).toMatchObject({
+      cost: '1.00',
+      currency: 'USDT',
+      costUsd: null,
+      canImport: false,
+    });
+    expect(preview.data.find((p) => p.slug === remote.slug)).toMatchObject({
+      currency: 'USD',
+      canImport: true,
+    });
+    await expect(importCatalog([remote.slug, usdt.slug], 'test-owner')).rejects.toMatchObject({
+      code: 'CATALOG_CURRENCY_UNSUPPORTED',
+    });
+    expect(await db.product.count()).toBe(1);
+    await importCatalog([remote.slug], 'test-owner');
+    expect(
+      (await db.product.findUniqueOrThrow({ where: { slug: remote.slug } })).costUsd.toFixed(2),
+    ).toBe('1.00');
+    expect(await db.product.findUnique({ where: { slug: usdt.slug } })).toBeNull();
+  });
+  it('desativa produto que mudou para USDT sem sobrescrever seu custo USD anterior', async () => {
+    vi.spyOn(partner, 'products').mockResolvedValue({
+      data: [{ ...live, currency: 'USDT', yourPrice: '8.00' }],
+    });
+    await syncCatalog();
+    const product = await db.product.findUniqueOrThrow({ where: { slug: live.slug } });
+    expect(product.available).toBe(false);
+    expect(product.stock).toBe(0);
+    expect(product.costUsd.toFixed(2)).toBe('1.00');
+    expect(product.authorizedResale).toBe(true);
+  });
+  it('não reserva saldo nem cria pedido para custo em moeda não suportada', async () => {
+    await credit();
+    vi.mocked(partner.product).mockResolvedValue({ ...live, currency: 'USDT' });
+    await expect(purchase()).rejects.toMatchObject({ code: 'PRODUCT_CURRENCY_UNSUPPORTED' });
+    expect(await db.order.count()).toBe(0);
+    expect(await db.ledgerEntry.count({ where: { kind: 'RESERVE' } })).toBe(0);
+  });
+  it('libera a reserva sem comprar se o fornecedor muda a moeda antes do envio', async () => {
+    await credit();
+    const order = await purchase();
+    vi.mocked(partner.product).mockResolvedValue({ ...live, currency: 'USDT' });
+    const post = vi.spyOn(partner, 'createOrder');
+    await processOrder(order.id);
+    expect(post).not.toHaveBeenCalled();
+    const wallet = await db.wallet.findUniqueOrThrow({ where: { customerId } });
+    expect(wallet.available.toFixed(2)).toBe('100.00');
+    expect(wallet.reserved.toFixed(2)).toBe('0.00');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('FAILED');
+  });
   it('consulta e filtra a prévia sem importar produtos', async () => {
     vi.spyOn(partner, 'products').mockResolvedValue({ data: [live, remote] });
     const preview = await browseCatalog({

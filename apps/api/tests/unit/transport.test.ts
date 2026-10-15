@@ -1,4 +1,5 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 const mocks = vi.hoisted(() => ({
   redis: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK'), eval: vi.fn(async () => 1) },
   log: vi.fn(async () => ({})),
@@ -14,11 +15,61 @@ vi.mock('../../src/core/settings.js', () => ({
 }));
 import { PartnerApiService } from '../../src/integrations/partner.js';
 import { PartnerError } from '../../src/core/errors.js';
+function documentedExample(heading: string) {
+  const docs = readFileSync(
+    new URL('../../../../docs/references/partner-api-docs.html', import.meta.url),
+    'utf8',
+  );
+  const start = docs.indexOf(`<h3>${heading}</h3>`);
+  const json = docs.slice(start).match(/<pre>([\s\S]*?)<\/pre>/)?.[1];
+  if (start < 0 || !json) throw new Error('Exemplo de contrato não encontrado.');
+  return JSON.parse(json);
+}
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.redis.eval.mockResolvedValue(1);
 });
 afterEach(() => vi.unstubAllGlobals());
+it('aceita os exemplos completos de fornecedores e produtos da documentação Partner', async () => {
+  const providers = documentedExample('GET /catalog/providers');
+  const products = documentedExample('GET /catalog/products?provider=gemini');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async (url: string) =>
+        new Response(JSON.stringify(url.endsWith('/providers') ? providers : products), {
+          status: 200,
+        }),
+    ),
+  );
+  const service = new PartnerApiService();
+  expect((await service.providers()).data[0]?.key).toBe('gemini');
+  expect((await service.products()).data[0]).toMatchObject({
+    slug: 'gemini-pro-monthly',
+    yourPrice: '12.50',
+  });
+});
+it('lê catálogo misto com os 20 índices USDT do diagnóstico sem converter a moeda', async () => {
+  const sample = documentedExample('GET /catalog/products?provider=gemini').data[0];
+  const usdt = new Set([
+    2, 5, 17, 29, 31, 32, 35, 37, 62, 65, 66, 70, 74, 75, 76, 77, 83, 84, 85, 86,
+  ]);
+  const data = Array.from({ length: 90 }, (_, index) => ({
+    ...sample,
+    id: index + 1,
+    slug: `service-${index}`,
+    currency: usdt.has(index) ? 'USDT' : 'USD',
+  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ data }), { status: 200 })),
+  );
+  const result = await new PartnerApiService().products();
+  expect(result.data).toHaveLength(90);
+  expect(result.data.filter((p) => p.currency === 'USDT')).toHaveLength(20);
+  expect(result.data[2]).toMatchObject({ currency: 'USDT', yourPrice: '12.50' });
+  expect(result.data[0]).toMatchObject({ currency: 'USD', yourPrice: '12.50' });
+});
 it('usa envelope data para catálogo e Bearer no servidor', async () => {
   const fetch = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
   vi.stubGlobal('fetch', fetch);

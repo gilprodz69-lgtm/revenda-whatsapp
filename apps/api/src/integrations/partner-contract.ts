@@ -24,7 +24,9 @@ export const productSchema = z.object({
   deliveryType: deliveryTypeSchema,
   catalogPrice: money,
   yourPrice: money,
-  currency: z.literal('USD'),
+  // Catalog metadata may contain USDT or another currency. Monetary operations
+  // must check support explicitly; never reinterpret these amounts as USD.
+  currency: z.string().regex(/^[A-Z][A-Z0-9]{2,9}$/),
   durationDays: z.number().int().nullable().optional(),
   warranty: z
     .object({ enabled: z.boolean(), days: z.number().int().nullable().optional() })

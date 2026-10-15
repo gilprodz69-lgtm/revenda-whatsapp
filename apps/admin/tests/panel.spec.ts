@@ -23,7 +23,9 @@ async function mockApi(page: Page, loggedIn = true) {
     name: `Serviço ${String(index + 1).padStart(2, '0')}`,
     code: `SVC-${index + 1}`,
     provider: index % 2 ? { key: 'openai', name: 'OpenAI' } : { key: 'gemini', name: 'Gemini' },
-    costUsd: '5.00',
+    cost: '5.00',
+    currency: index === 2 ? 'USDT' : 'USD',
+    canImport: index !== 2,
     stock: 10,
     available: true,
   }));
@@ -250,6 +252,31 @@ test('mostra erro da Partner na janela de importação e permite tentar novament
   await expect(dialog.getByRole('alert')).not.toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
+});
+
+test('mostra a moeda USDT e mantém seleção individual e em lote somente em USD', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Importar serviços', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Importar serviços', exact: true });
+  const checkbox = dialog.getByRole('checkbox', { name: 'Selecionar Serviço 03', exact: true });
+  await expect(checkbox).toBeDisabled();
+  const row = dialog.locator('.import-service').filter({ hasText: 'Serviço 03' });
+  await expect(row).toContainText('USDT 5,00');
+  await expect(row).toContainText('Moeda sem suporte para importação');
+  await dialog.getByRole('button', { name: 'Selecionar página', exact: true }).click();
+  const mutation = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname === '/api/products/import',
+  );
+  await dialog.getByRole('button', { name: 'Importar selecionados (23)', exact: true }).click();
+  const slugs = (await mutation).postDataJSON().slugs;
+  expect(slugs).toHaveLength(23);
+  expect(slugs).not.toContain('service-3');
+  expect(slugs).not.toContain('service-1');
 });
 
 test('modal contém o foco, permite navegar nas abas por teclado e fecha com Escape', async ({

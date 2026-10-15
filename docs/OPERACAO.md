@@ -2,7 +2,9 @@
 
 ## Importar serviços
 
-Em **Produtos → Importar serviços**, consulte o catálogo da Partner, pesquise por nome/código/slug e filtre o fornecedor. Marque os serviços desejados e clique em **Importar selecionados**. A janela mostra custo em USD, estoque e indicação dos serviços já importados. Você pode revisar a seleção e remover itens antes de importar; ela é mantida entre páginas e filtros. São até 100 serviços por operação.
+Em **Produtos → Importar serviços**, consulte o catálogo da Partner, pesquise por nome/código/slug e filtre o fornecedor. Marque os serviços desejados e clique em **Importar selecionados**. A janela mostra custo na moeda original, estoque e indicação dos serviços já importados. Você pode revisar a seleção e remover itens antes de importar; ela é mantida entre páginas e filtros. São até 100 serviços por operação.
+
+Esta versão permite importar somente serviços em **USD**. Produtos em **USDT** são exibidos com a moeda correta e o aviso **Moeda sem suporte para importação**, sem impedir a consulta/importação dos serviços USD. A seleção de página também exclui itens sem suporte. A aplicação não presume paridade USD/USDT; o suporte à venda em outra moeda exige conversão e contabilização próprias.
 
 Após importar, abra **Editar** para definir preço/margem e, em **Disponibilidade**, conferir e autorizar a revenda. Os novos produtos aguardam essa autorização antes de aparecerem no bot. **Sincronizar importados** atualiza custo/estoque dos serviços já cadastrados; a atualização automática também respeita a escolha e não adiciona outros serviços do fornecedor.
 

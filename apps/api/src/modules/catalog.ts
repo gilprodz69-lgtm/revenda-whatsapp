@@ -53,7 +53,10 @@ export async function browseCatalog(query: {
       name: p.name,
       code: p.productCode,
       provider: p.provider,
-      costUsd: p.yourPrice,
+      cost: p.yourPrice,
+      currency: p.currency,
+      costUsd: p.currency === 'USD' ? p.yourPrice : null,
+      canImport: p.currency === 'USD',
       stock: p.stock.count,
       available: p.stock.inStock,
       imported: imported.has(p.slug),
@@ -150,6 +153,12 @@ export async function importCatalog(slugs: string[], actorId: string) {
           'Um serviço selecionado não está mais no catálogo. Atualize a lista e escolha novamente.',
           409,
         );
+      if (product.currency !== 'USD')
+        throw new AppError(
+          'CATALOG_CURRENCY_UNSUPPORTED',
+          `Este serviço usa ${product.currency}. A importação atual suporta apenas USD.`,
+          409,
+        );
       return product;
     });
     const now = new Date();
@@ -175,13 +184,13 @@ export async function syncCatalog() {
     const imported = new Set(
       (await db.product.findMany({ select: { slug: true } })).map((p) => p.slug),
     );
-    const selected = products.filter((p) => imported.has(p.slug));
+    const selected = products.filter((p) => imported.has(p.slug) && p.currency === 'USD');
     const now = new Date();
     await transaction(async (tx) => {
       await storeProducts(tx, selected, now);
       // Retain local rules/history while excluding products absent from the complete upstream list.
       await tx.product.updateMany({
-        where: { slug: { notIn: products.map((p) => p.slug) } },
+        where: { slug: { notIn: products.filter((p) => p.currency === 'USD').map((p) => p.slug) } },
         data: { available: false, stock: 0, syncedAt: now },
       });
     });

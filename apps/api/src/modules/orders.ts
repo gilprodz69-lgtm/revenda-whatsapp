@@ -15,6 +15,11 @@ export async function quoteProduct(slug: string, quantity: number) {
   if (!local.active || !local.visible || !local.authorizedResale)
     throw new AppError('PRODUCT_UNAVAILABLE', 'Este produto não está disponível para venda.');
   const live = await partner.product(slug);
+  if (live.currency !== 'USD')
+    throw new AppError(
+      'PRODUCT_CURRENCY_UNSUPPORTED',
+      `A venda deste serviço está indisponível para a moeda ${live.currency}.`,
+    );
   if (!live.stock.inStock || quantity > live.stock.count || quantity > live.stock.maxQuantity)
     throw new AppError('OUT_OF_STOCK', 'Quantidade indisponível no estoque.');
   const rate = await currentRate();
@@ -240,6 +245,10 @@ export async function processOrder(id: string) {
       const health = await partner.health();
       if (!health.ok) throw new PartnerError('MAINTENANCE', undefined, 503);
       const live = await partner.product(body.productSlug);
+      if (live.currency !== 'USD') {
+        await failOrder(id, 'PRODUCT_CURRENCY_UNSUPPORTED');
+        return;
+      }
       if (
         !live.stock.inStock ||
         live.stock.count < body.quantity ||
