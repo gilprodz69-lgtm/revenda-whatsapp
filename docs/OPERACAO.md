@@ -12,6 +12,10 @@ Se a consulta falhar, o erro fica na janela com a opção **Tentar novamente**. 
 
 ## Serviços
 
+Para conferir a cotação: **Configurações → Cotação USD / BRL**. O quadro deve mostrar **Cotação válida**, valor e validade. Se indicar **Nenhuma cotação válida**, clique em **Consultar BCB** ou defina uma cotação manual com prazo. Salvar o modo **BCB · PTAX venda** também busca um fechamento; salvar somente o modo manual não define um valor.
+
+Uma resposta **502** da Partner pode impedir a consulta de um produto temporariamente. Consulte novamente após a recuperação do fornecedor. Os logs registram status/código sem chave ou corpo da resposta. Leituras fazem até três tentativas; falhas de criação de pedido não disparam repetição automática do POST pelo transporte e continuam no fluxo de reconciliação.
+
 ```bash
 sudo docker compose ps
 sudo bash scripts/healthcheck.sh

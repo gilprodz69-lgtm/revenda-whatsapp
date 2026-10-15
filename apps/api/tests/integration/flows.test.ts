@@ -773,6 +773,119 @@ describe('Catálogo, webhooks e fluxo completo', () => {
     expect(await db.ledgerEntry.count({ where: { kind: 'DEPOSIT' } })).toBe(1);
   });
 });
+describe('Cotação BCB e estado de configuração', () => {
+  async function session() {
+    const admin = await db.admin.create({
+      data: { email: 'exchange@example.com', passwordHash: 'test-session-fixture', role: 'OWNER' },
+    });
+    const token = randomUUID(),
+      csrf = randomUUID();
+    await db.adminSession.create({
+      data: {
+        id: hash(token),
+        adminId: admin.id,
+        csrfHash: hash(csrf),
+        expiresAt: new Date(Date.now() + 60000),
+      },
+    });
+    return { cookie: `session=${token}`, origin: process.env.APP_ORIGIN!, 'x-csrf-token': csrf };
+  }
+  it('salvar BCB obtém taxa válida e Consultar BCB funciona também em modo manual', async () => {
+    await db.exchangeRate.deleteMany();
+    const headers = await session();
+    const fetch = vi.fn(
+      async (url: string) =>
+        new Response(
+          url.includes('+')
+            ? 'invalid OData filter'
+            : JSON.stringify({
+                value: [
+                  {
+                    cotacaoVenda: 5.25,
+                    dataHoraCotacao: new Date(Date.now() - 3 * 3600000)
+                      .toISOString()
+                      .slice(0, 19)
+                      .replace('T', ' '),
+                  },
+                ],
+              }),
+          { status: url.includes('+') ? 400 : 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const app = await buildApp();
+    try {
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/settings', headers })).json().currentRate,
+      ).toBeNull();
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/products', headers })).json().data[0].quote,
+      ).toBeNull();
+      const save = await app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers,
+        payload: { 'exchange.provider': 'bcb' },
+      });
+      expect(save.statusCode).toBe(200);
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/settings', headers })).json().currentRate
+          .usdBrl,
+      ).toBe('5.25');
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/products', headers })).json().data[0].quote
+          .unitSaleBrl,
+      ).toBe('10.50');
+      await app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers,
+        payload: { 'exchange.provider': 'manual' },
+      });
+      await db.exchangeRate.deleteMany();
+      const query = await app.inject({ method: 'POST', url: '/api/exchange/refresh', headers });
+      expect(query.statusCode).toBe(200);
+      expect(query.json().usdBrl).toBe('5.25');
+      expect(await db.exchangeRate.count()).toBe(1);
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/settings', headers })).json().values[
+          'exchange.provider'
+        ],
+      ).toBe('manual');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+  it('não confirma sucesso nem cria cotação se a consulta falhar ao ativar BCB', async () => {
+    await db.exchangeRate.deleteMany();
+    const headers = await session();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('unavailable', { status: 503 })),
+    );
+    const app = await buildApp();
+    try {
+      const save = await app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers,
+        payload: { 'exchange.provider': 'bcb' },
+      });
+      expect(save.statusCode).toBe(503);
+      expect(save.json()).toMatchObject({
+        code: 'RATE_REFRESH_FAILED',
+        message: expect.stringContaining('Modo BCB salvo, mas'),
+      });
+      expect(await db.exchangeRate.count()).toBe(0);
+      expect(
+        (await app.inject({ method: 'GET', url: '/api/settings', headers })).json().currentRate,
+      ).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+});
 describe('Importação seletiva do catálogo', () => {
   const remote = {
     ...live,

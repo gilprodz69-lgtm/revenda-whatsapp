@@ -14,6 +14,10 @@ export const partnerMessages: Record<string, string> = {
   API_ACCESS_DISABLED: 'O acesso da loja à API está desativado.',
   PARTNER_SUSPENDED: 'A integração está suspensa.',
   MAINTENANCE: 'O fornecedor está em manutenção. Tente mais tarde.',
+  UPSTREAM_UNAVAILABLE:
+    'O fornecedor está temporariamente indisponível. Aguarde um instante e tente novamente.',
+  TRANSPORT_UNKNOWN:
+    'Falha de comunicação com o fornecedor. Aguarde um instante e tente novamente.',
   RATE_LIMIT_EXCEEDED: 'Aguarde um momento antes de tentar novamente.',
   PRODUCT_NOT_FOUND: 'Produto não encontrado.',
   PRODUCT_NOT_ALLOWED: 'Este produto não está disponível para a loja.',

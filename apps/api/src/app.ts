@@ -806,6 +806,10 @@ export async function buildApp() {
             mpWebhookSecret: !!env.MP_WEBHOOK_SECRET,
           },
           rates: await db.exchangeRate.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),
+          currentRate: await db.exchangeRate.findFirst({
+            where: { expiresAt: { gt: new Date() } },
+            orderBy: { createdAt: 'desc' },
+          }),
           templates: await Promise.all(
             Object.entries(templates).map(async ([key, t]) => ({
               key,
@@ -859,6 +863,17 @@ export async function buildApp() {
             key.startsWith('secret.'),
           );
         await audit(request.admin.id, 'settings.update', 'settings', { keys: Object.keys(body) });
+        if (body['exchange.provider'] === 'bcb') {
+          try {
+            await refreshExchange();
+          } catch (error) {
+            throw new AppError(
+              'RATE_REFRESH_FAILED',
+              `Modo BCB salvo, mas não foi possível obter uma cotação válida. ${error instanceof AppError ? error.message : 'Tente Consultar BCB novamente.'}`,
+              503,
+            );
+          }
+        }
         return { ok: true };
       });
       admin.post('/exchange/manual', async (request) => {
@@ -889,7 +904,7 @@ export async function buildApp() {
       });
       admin.post('/exchange/refresh', async (request) => {
         requirePermission(request, 'configure');
-        return (await refreshExchange()) ?? { message: 'Provedor manual selecionado.' };
+        return refreshExchange({ force: true });
       });
       admin.get('/partner/health', async () => partner.health());
       admin.get('/partner/usage', async () => partner.usage());

@@ -40,6 +40,10 @@ Aprovação depende da consulta ao provedor. Prints e mensagens de clientes não
 
 ## Cotação
 
+Em **Configurações → Cotação USD / BRL**, salvar **BCB · PTAX venda** consulta e grava um fechamento imediatamente. Se a consulta falhar, a preferência BCB permanece salva, mas a operação retorna erro explícito de consulta. O painel indica separadamente a existência de **cotação válida**, seu valor e vencimento. **Consultar BCB** faz uma consulta real mesmo quando o modo de renovação selecionado é manual, sem alterar esse modo. Uma preferência salva não substitui um registro de cotação válido.
+
+A consulta OData codifica espaços com `%20`. O serviço Olinda responde HTTP 400 ao filtro com espaços codificados como `+`. Respostas HTTP inválidas, formato inesperado, data inválida e fechamento vencido não geram cotação. Falha de transporte não inventa valor nem estende validade.
+
 Sem taxa válida, vendas são bloqueadas. Manual: informe valor real, justificativa/fonte e validade de 1 a 168 horas. BCB: busca último boletim PTAX de fechamento de venda USD publicado nos últimos sete dias; a taxa vence quatro dias depois do boletim. Falhas não inventam taxa nem estendem automaticamente uma taxa vencida. PTAX é referência comercial escolhida pelo operador; a operação pode configurar taxa manual que reflita seu financiamento real.
 
 ## Domínio e rede

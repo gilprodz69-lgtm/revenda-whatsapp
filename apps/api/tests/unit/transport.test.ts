@@ -29,7 +29,44 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.redis.eval.mockResolvedValue(1);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+it('identifica 502 HTML sem expor corpo e mantém GET limitado a três tentativas', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(
+    async () => new Response('<html>PRIVATE-UPSTREAM-BODY</html>', { status: 502 }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const pending = expect(
+    new PartnerApiService().product('gemini-link-pro-18months'),
+  ).rejects.toMatchObject({
+    code: 'UPSTREAM_UNAVAILABLE',
+    status: 502,
+    uncertain: false,
+    message: expect.stringContaining('temporariamente indisponível'),
+  });
+  await vi.runAllTimersAsync();
+  await pending;
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(JSON.stringify(mocks.log.mock.calls)).not.toContain('PRIVATE-UPSTREAM-BODY');
+  expect(mocks.log).toHaveBeenCalledWith({
+    data: expect.objectContaining({ code: 'UPSTREAM_UNAVAILABLE', status: 502 }),
+  });
+});
+it('502 na compra permanece incerto e não repete o POST automaticamente', async () => {
+  const fetch = vi.fn(async () => new Response('Bad Gateway', { status: 502 }));
+  vi.stubGlobal('fetch', fetch);
+  await expect(
+    new PartnerApiService().createOrder({
+      productSlug: 'product',
+      quantity: 1,
+      externalOrderId: 'same-reference',
+    }),
+  ).rejects.toMatchObject({ code: 'UPSTREAM_UNAVAILABLE', uncertain: true });
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 it('aceita os exemplos completos de fornecedores e produtos da documentação Partner', async () => {
   const providers = documentedExample('GET /catalog/providers');
   const products = documentedExample('GET /catalog/products?provider=gemini');

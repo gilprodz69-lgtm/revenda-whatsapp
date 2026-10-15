@@ -80,18 +80,23 @@ export class PartnerApiService {
           Math.max(60, Math.min(seconds || 60, 86400)),
         );
       }
-      const json = (await response.json()) as {
+      const json = (await response.json().catch((error: unknown) => {
+        if (response.ok) throw error;
+        return {};
+      })) as {
         ok?: boolean;
         error?: { code?: string; requestId?: string };
       };
       if (!response.ok || (path !== '/health' && json.ok === false)) {
-        code = typeof json.error === 'object' ? json.error?.code : undefined;
+        const providerCode = typeof json.error === 'object' ? json.error?.code : undefined;
+        code = providerCode ?? (response.status >= 500 ? 'UPSTREAM_UNAVAILABLE' : 'FAILED');
         requestId = typeof json.error === 'object' ? json.error?.requestId : undefined;
         throw new PartnerError(
-          code ?? 'FAILED',
+          code,
           requestId,
           response.status,
-          method === 'POST' && (response.status >= 500 || !code || code === 'FAILED'),
+          method === 'POST' &&
+            (response.status >= 500 || !providerCode || providerCode === 'FAILED'),
         );
       }
       return json;
@@ -131,7 +136,7 @@ export class PartnerApiService {
         if (
           i >= 2 ||
           !(e instanceof PartnerError) ||
-          !['MAINTENANCE', 'TRANSPORT_UNKNOWN'].includes(e.code)
+          !['MAINTENANCE', 'TRANSPORT_UNKNOWN', 'UPSTREAM_UNAVAILABLE'].includes(e.code)
         )
           throw e;
         await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** i));

@@ -17,6 +17,19 @@ const dashboard = {
 async function mockApi(page: Page, loggedIn = true) {
   const settings: Record<string, unknown> = {};
   const secrets: Record<string, boolean> = {};
+  let rates: Record<string, unknown>[] = [];
+  const refreshRate = () => {
+    rates = [
+      {
+        id: 'bcb-test-rate',
+        usdBrl: '5.25',
+        source: 'BCB-PTAX-venda',
+        observedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      },
+    ];
+    return rates[0];
+  };
   const imported = new Set(['service-1']);
   const catalog = Array.from({ length: 28 }, (_, index) => ({
     slug: `service-${index + 1}`,
@@ -92,19 +105,23 @@ async function mockApi(page: Page, loggedIn = true) {
         total: 1,
       };
     else if (url.pathname === '/api/settings') {
-      if (req.method() === 'PUT')
+      if (req.method() === 'PUT') {
         for (const [key, value] of Object.entries(req.postDataJSON())) {
           if (key.startsWith('secret.')) secrets[key] = !!value;
           else settings[key] = value;
         }
+        if (req.postDataJSON()['exchange.provider'] === 'bcb') refreshRate();
+      }
       body = {
         values: settings,
         secrets,
         environment: {},
-        rates: [],
+        rates,
+        currentRate: rates[0] ?? null,
         templates: [{ key: 'summary', label: 'Resumo do pedido', text: 'Total: R$ {valor}' }],
       };
-    } else if (url.pathname === '/api/whatsapp/license') body = { status: 'active' };
+    } else if (url.pathname === '/api/exchange/refresh') body = refreshRate();
+    else if (url.pathname === '/api/whatsapp/license') body = { status: 'active' };
     else if (url.pathname === '/api/whatsapp') body = [];
     else body = { data: [], total: 0 };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -143,6 +160,60 @@ test('login, dashboard, tema e navegação responsiva', async ({ page }) => {
   });
   await navigate(page, 'Pedidos');
   await expect(page.getByText('Nenhum registro encontrado')).toBeVisible();
+});
+
+test('distingue modo salvo de cotação válida e consulta BCB em ambos os modos', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Configurações');
+  const card = page.locator('section.card').filter({ hasText: 'Cotação USD / BRL' });
+  await expect(card.getByRole('status')).toContainText(
+    'Nenhuma cotação válida. Vendas bloqueadas.',
+  );
+  await card.getByLabel('Modo da cotação').selectOption('bcb');
+  await card.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(card.getByRole('status')).toContainText('Cotação válida: R$ 5,25 por USD');
+  await page.reload();
+  await navigate(page, 'Configurações');
+  await expect(card.getByRole('status')).toContainText('Cotação válida: R$ 5,25 por USD');
+  await card.getByLabel('Modo da cotação').selectOption('manual');
+  await card.getByRole('button', { name: 'Salvar', exact: true }).click();
+  const mutation = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === '/api/exchange/refresh' && request.method() === 'POST',
+  );
+  await card.getByRole('button', { name: 'Consultar BCB', exact: true }).click();
+  await mutation;
+  await expect(card.getByRole('status')).toContainText('Cotação válida: R$ 5,25 por USD');
+  await expect(card.getByLabel('Modo da cotação')).toHaveValue('manual');
+});
+
+test('falha do BCB não mostra sucesso nem cotação válida e permite nova consulta', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let fail = true;
+  await page.route('**/api/exchange/refresh', async (route) => {
+    if (!fail) return route.fallback();
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Cotação oficial indisponível.' }),
+    });
+  });
+  await page.goto('/');
+  await navigate(page, 'Configurações');
+  const card = page.locator('section.card').filter({ hasText: 'Cotação USD / BRL' });
+  await card.getByRole('button', { name: 'Consultar BCB', exact: true }).click();
+  await expect(page.getByText('Cotação oficial indisponível.', { exact: true })).toBeVisible();
+  await expect(card.getByRole('status')).toContainText(
+    'Nenhuma cotação válida. Vendas bloqueadas.',
+  );
+  fail = false;
+  await card.getByRole('button', { name: 'Consultar BCB', exact: true }).click();
+  await expect(card.getByRole('status')).toContainText('Cotação válida: R$ 5,25 por USD');
 });
 test('edita regras de produto com valores financeiros em strings', async ({ page }) => {
   await mockApi(page);

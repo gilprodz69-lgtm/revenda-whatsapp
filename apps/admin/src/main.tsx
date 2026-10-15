@@ -1291,8 +1291,28 @@ function App() {
                           <div className="card-title">
                             <div>
                               <h2>Cotação USD / BRL</h2>
-                              <p>Nenhuma cotação fictícia é aplicada.</p>
+                              <p>
+                                O modo BCB busca uma cotação ao salvar. Confira abaixo se ela está
+                                válida.
+                              </p>
                             </div>
+                          </div>
+                          <div className="permission-box" role="status">
+                            {data.currentRate ? (
+                              <span>
+                                <strong>
+                                  Cotação válida: {brl(data.currentRate.usdBrl)} por USD
+                                </strong>
+                                <br />
+                                Válida até {date(data.currentRate.expiresAt)}
+                              </span>
+                            ) : (
+                              <span>
+                                <strong>Nenhuma cotação válida. Vendas bloqueadas.</strong>
+                                <br />
+                                Consulte o BCB ou defina uma cotação manual com validade.
+                              </span>
+                            )}
                           </div>
                           <form
                             className="inline-form"
@@ -1300,13 +1320,22 @@ function App() {
                               e.preventDefault();
                               const f = new FormData(e.currentTarget);
                               try {
-                                await act('/settings', 'PUT', {
-                                  'exchange.provider': f.get('provider'),
-                                });
+                                await act(
+                                  '/settings',
+                                  'PUT',
+                                  {
+                                    'exchange.provider': f.get('provider'),
+                                  },
+                                  f.get('provider') === 'bcb'
+                                    ? 'Modo BCB salvo e cotação consultada.'
+                                    : 'Modo manual salvo. Confira a validade da cotação.',
+                                );
                               } catch {}
                             }}
                           >
                             <select
+                              aria-label="Modo da cotação"
+                              disabled={busy}
                               name="provider"
                               defaultValue={data.values['exchange.provider'] ?? 'manual'}
                             >
@@ -1318,12 +1347,24 @@ function App() {
                             </button>
                           </form>
                           <div className="instance-actions">
-                            <button className="secondary" onClick={() => open('rate')}>
+                            <button
+                              className="secondary"
+                              onClick={() => open('rate')}
+                              disabled={busy}
+                            >
                               Definir cotação manual
                             </button>
                             <button
                               className="secondary"
-                              onClick={() => void act('/exchange/refresh').catch(() => {})}
+                              disabled={busy}
+                              onClick={() =>
+                                void act(
+                                  '/exchange/refresh',
+                                  'POST',
+                                  undefined,
+                                  'Cotação do BCB obtida e salva.',
+                                ).catch(() => {})
+                              }
                             >
                               Consultar BCB
                             </button>
