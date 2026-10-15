@@ -1,5 +1,15 @@
 # Registro de validação
 
+## Versão 1.0.5
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38660878396), commit de código `4e3e540`, passou em 14/10/2026 (Brasília): **83 testes unitários, 49 de integração e 24 de interface, 156 no total**, TypeScript, builds, smoke API/worker, auditoria npm, scripts, updater, imagens e inicialização Docker. O smoke da Evolution confirmou novamente os registros de teste preservados na migração 2.3.7 → 2.4.0-rc2.
+
+O diagnóstico fornecido pelo operador apontou `USDT` em 20 posições do catálogo, rejeitadas pelo literal `USD`. O exemplo HTML original foi testado diretamente e passa; um cenário com 90 produtos simulados reproduziu os mesmos 20 índices em USDT e confirmou a leitura completa sem alterar a moeda/preço. A prévia agora informa a moeda original; somente USD pode ser importado/vendido nesta versão.
+
+Os testes com PostgreSQL verificaram catálogo misto, importação USD, recusa de seleção contendo USDT sem gravação parcial e desativação de produto cuja moeda mudou sem sobrescrever seu custo USD anterior. A compra não reserva saldo em moeda sem suporte; se a moeda muda após a reserva e antes do primeiro envio, o pedido falha e o saldo é liberado sem POST de compra. O painel desktop/celular identifica USDT, bloqueia a seleção individual e o exclui da seleção em lote. A formatação local passou.
+
+Nenhuma taxa USDT/USD foi presumida. As chamadas externas dos testes são simuladas; o diagnóstico real veio da saída enviada pelo operador. O assistente não acessou a VPS nem realizou compras ou pagamentos reais.
+
 ## Versão 1.0.4
 
 A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38659057689), commit de código `faa03d8`, passou em 14/10/2026 (horário de Brasília): **81 testes unitários, 45 de integração e 22 de interface, 148 no total**, TypeScript, builds, smoke API/worker, auditoria npm, scripts, updater e inicialização Docker. O teste de migração da Evolution 2.3.7 para 2.4.0-rc2 confirmou a preservação dos registros de teste no banco/volume e a indicação de ativação pendente.
