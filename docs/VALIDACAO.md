@@ -1,5 +1,15 @@
 # Registro de validação
 
+## Versão 1.0.8
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38738145379), commit de código `e81cf5a`, foi aprovada: **94 testes unitários, 70 de integração e 34 de interface, 198 no total**, TypeScript, builds, smoke API/worker, auditoria npm sem vulnerabilidades reportadas, scripts Linux, updater e inicialização Docker. As cinco migrations existentes passaram; esta versão não adiciona migrations. O smoke da Evolution confirmou a preservação dos registros de teste de banco/sessão entre 2.3.7 e 2.4.0-rc2.
+
+O cenário relatado foi reproduzido nos testes com a frase da captura após gerar uma cobrança Pix. Em modo interativo e texto, a conversa entra em espera: frases comuns, alegação de pagamento, números e botões antigos não geram resposta, nova cobrança, compra ou crédito e não renovam a sessão. Somente uma palavra-chave configurada reabre o menu; a navegação numérica segue funcionando depois da reativação. Uma confirmação autenticada simulada do gateway continua creditando a carteira e enviando a notificação sem reabrir o atendimento.
+
+Os testes também cobrem as sete etapas de navegação/formulário ignorando texto alheio à etapa, preservação do prazo e botões de menus antigos, saudações removidas da configuração e Pix gerado antes desta versão. Neste último caso, a leitura da última resposta do atendimento reconhece o lote Pix antigo sem excluir ou regravar a cobrança/conversa; números e botões antigos são bloqueados até uma palavra-chave, e a navegação volta a funcionar após a reativação.
+
+Partner, gateway e envio de WhatsApp são simulados nos testes; nenhum pagamento ou pedido externo real foi executado pelo assistente. A VPS do operador não foi acessada. Os testes de atualização e a inicialização Docker verificaram preservação e saúde no ambiente isolado; a aplicação da release na VPS é feita pelo operador.
+
 ## Versão 1.0.7
 
 A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38730240498), commit de código `6c58913`, foi aprovada: **94 testes unitários, 58 de integração e 34 de interface, 186 no total**, TypeScript, builds, smoke API/worker, auditoria npm sem vulnerabilidades reportadas, scripts, updater e inicialização Docker. As cinco migrations foram aplicadas no banco isolado. A verificação da Evolution preservou os registros de teste de banco/sessão entre 2.3.7 e 2.4.0-rc2.
