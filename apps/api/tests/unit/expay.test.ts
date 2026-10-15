@@ -8,6 +8,7 @@ vi.mock('../../src/core/settings.js', () => ({
 }));
 import {
   ExpayGateway,
+  MercadoPagoGateway,
   parseExpayCharge,
   expayNotificationChargeId,
 } from '../../src/integrations/pix.js';
@@ -21,6 +22,36 @@ const valid = {
   status: 'pending',
   pix_data: { copy_paste: 'PIX-TEST', qr_code_base64: 'data:image/png;base64,aW1hZ2U=' },
 };
+it.each([{}, { name: 'Cliente' }])(
+  'gera Pix Expay sem exigir ou inventar CPF/e-mail: %j',
+  async (payer) => {
+    const gateway = new ExpayGateway();
+    expect(gateway.requiresPayerDetails).toBe(false);
+    const body = JSON.parse(
+      await gateway.buildRequest({
+        reference: 'local-reference',
+        amount: '20.00',
+        payer,
+        expiresAt: new Date(),
+      }),
+    );
+    expect(body).toMatchObject({ amount: 20, currency: 'BRL', payment_method: 'pix' });
+    expect(body.customer).not.toHaveProperty('email');
+    expect(body.customer).not.toHaveProperty('document');
+  },
+);
+it('mantém a exigência de dados do pagador no Mercado Pago', async () => {
+  const gateway = new MercadoPagoGateway();
+  expect(gateway.requiresPayerDetails).toBe(true);
+  await expect(
+    gateway.buildRequest({
+      reference: 'local-reference',
+      amount: '20.00',
+      payer: {},
+      expiresAt: new Date(),
+    }),
+  ).rejects.toMatchObject({ code: 'PIX_PAYER_REQUIRED' });
+});
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.setting.mockImplementation(async (_key, fallback) => fallback);

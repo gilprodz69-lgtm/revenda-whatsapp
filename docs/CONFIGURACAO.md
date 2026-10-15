@@ -20,7 +20,11 @@ Produtos entram com `authorizedResale=false`. O proprietário precisa conferir o
 
 O gateway escolhido para esta operação é **Expay Brasil**. Use a chave da API atual documentada em [expaybrasil.com/docs](https://expaybrasil.com/docs): `X-API-Key`, base `https://expaybrasil.com/api/v1`, criação `POST /charges` com `Idempotency-Key` e consulta `GET /charges/{UUID}`. O contrato consultado está em [references/expay-openapi.json](references/expay-openapi.json), obtido em 14/10/2026. A documentação antiga em Readme.io usa outro contrato (`merchant_key`/purchase/link) e não é usada por este adaptador.
 
-O cliente fornece e-mail e CPF válido. O nome vem do cadastro do cliente. A referência local e o corpo são congelados antes da criação, e reenvios usam a mesma chave idempotente. `amount` é em reais, com duas casas, não centavos. O vencimento é o `expires_at` retornado pela Expay; se ausente, o bot não inventa uma data de expiração.
+Na Expay, o cliente informa somente o valor: e-mail e CPF não são solicitados nem inventados. O contrato oficial de `POST /charges` torna `customer` e seus campos opcionais para Pix; o nome enviado vem do cadastro do cliente. O Mercado Pago mantém sua coleta de e-mail e CPF válido, conforme os requisitos desse adaptador. Sessões Expay antigas que aguardavam e-mail/CPF continuam com o valor já informado na próxima resposta.
+
+O bot envia o resumo da cobrança, o QR Code (se fornecido pelo gateway) e, por último, uma mensagem contendo **somente o código Pix copia e cola**. Toque e segure essa mensagem no WhatsApp e selecione **Copiar**. O código não é misturado com menus, legendas ou instruções. A outbox grava as mensagens na mesma transação e com chaves únicas para evitar duplicação ao processar novamente o webhook.
+
+A referência local e o corpo são congelados antes da criação, e reenvios usam a mesma chave idempotente. `amount` é em reais, com duas casas, não centavos. O vencimento é o `expires_at` retornado pela Expay; se ausente, o bot não inventa uma data de expiração.
 
 Informe a chave no instalador ou selecione `expay` em Configurações → Gateway Pix e salve a chave. `EXPAY_API_KEY`/`EXPAY_STORE_ID` também são aceitos por ambiente. ID da loja é opcional e só é enviado se configurado. Sem credenciais, cobranças são recusadas.
 

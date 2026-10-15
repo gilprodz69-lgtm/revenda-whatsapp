@@ -6,6 +6,7 @@ import { AppError } from '../core/errors.js';
 import { setting } from '../core/settings.js';
 import { withLock } from '../core/lock.js';
 import { incomingSchema, incomingText, privateSenderPhone } from '../integrations/evolution.js';
+import { pixGateway, type PixPayer } from '../integrations/pix.js';
 import { notifyOutgoing, notifyOrder } from '../core/dispatch.js';
 import { activationKeywords, matchesActivation } from './bot-activation.js';
 import { quoteProduct, placeOrder } from './orders.js';
@@ -133,6 +134,7 @@ export async function processIncoming(eventId: string) {
         : { step: 'MENU' };
     let response = '';
     let qr: string | undefined;
+    let pixCode: string | undefined;
     let humanUntil: Date | undefined;
     let createdOrderId: string | undefined;
     let interactive: Interactive | undefined;
@@ -172,6 +174,21 @@ export async function processIncoming(eventId: string) {
     };
     const input = normalizedInput(raw),
       store = await setting('store.name', 'Nossa loja');
+    const finishDeposit = async (payer: PixPayer = {}) => {
+      if (!state.amount) throw new AppError('INVALID_AMOUNT', 'Informe novamente o valor do Pix.');
+      const payment = await createDeposit(
+        customer.id,
+        instance.name,
+        state.amount,
+        payer,
+        state.depositKey ?? `deposit-${event.key}`,
+      );
+      const code = payment.encryptedPixCode ? decrypt(payment.encryptedPixCode) : undefined;
+      response = `${await messageTemplate('awaitingPayment', { valor: payment.amountBrl.toFixed(2) })}\nVencimento: ${payment.expiresAt?.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) ?? 'consulte o prazo no aplicativo do banco'}\n\n${code ? 'O código Pix copia e cola será enviado em uma mensagem separada. Toque e segure a mensagem com o código e selecione Copiar para colar no aplicativo do seu banco.' : 'Cobrança em processamento. Aguarde ou solicite suporte.'}`;
+      pixCode = code;
+      qr = payment.encryptedQrImage ? decrypt(payment.encryptedQrImage) : undefined;
+      state = { step: 'MENU' };
+    };
     const mainMenu = async () => {
       const text = await messageTemplate('welcome', { nome: customer.name, loja: store });
       choices(
@@ -438,32 +455,26 @@ export async function processIncoming(eventId: string) {
             amount: new Prisma.Decimal(input.replace(',', '.')).toFixed(2),
             depositKey: `deposit-${event.key}`,
           };
-          response =
-            'Informe seu e-mail para a cobrança Pix. Ele será usado somente no processamento do pagamento.';
+          if (!(await pixGateway()).requiresPayerDetails) await finishDeposit();
+          else
+            response =
+              'Informe seu e-mail para a cobrança Pix. Ele será usado somente no processamento do pagamento.';
         }
       } else if (state.step === 'DEPOSIT_EMAIL') {
-        if (!z.string().email().safeParse(raw.trim()).success)
+        // Sessions started before the upgrade also skip optional payer questions.
+        if (!(await pixGateway()).requiresPayerDetails) await finishDeposit();
+        else if (!z.string().email().safeParse(raw.trim()).success)
           response = 'Informe um e-mail válido.';
         else {
           state = { ...state, step: 'DEPOSIT_CPF', email: raw.trim() };
           response =
             'Informe seu CPF para a cobrança (11 dígitos). Os dados ficam protegidos e não aparecem nos logs.';
         }
-      } else if (state.step === 'DEPOSIT_CPF' && state.amount && state.email) {
+      } else if (state.step === 'DEPOSIT_CPF' && state.amount) {
         const cpf = input.replace(/[.\-\s]/g, '');
-        if (!validCpf(cpf)) response = 'Informe um CPF válido.';
-        else {
-          const payment = await createDeposit(
-            customer.id,
-            instance.name,
-            state.amount,
-            { email: state.email, cpf },
-            state.depositKey ?? `deposit-${event.key}`,
-          );
-          response = `${await messageTemplate('awaitingPayment', { valor: payment.amountBrl.toFixed(2) })}\nVencimento: ${payment.expiresAt?.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) ?? 'consulte o prazo no aplicativo do banco'}\n\n${payment.encryptedPixCode ? decrypt(payment.encryptedPixCode) : 'Cobrança em processamento. Aguarde ou solicite suporte.'}`;
-          qr = payment.encryptedQrImage ? decrypt(payment.encryptedQrImage) : undefined;
-          state = { step: 'MENU' };
-        }
+        if (!(await pixGateway()).requiresPayerDetails) await finishDeposit();
+        else if (!validCpf(cpf)) response = 'Informe um CPF válido.';
+        else await finishDeposit({ email: state.email, cpf });
       }
     } catch (e) {
       interactive = undefined;
@@ -525,6 +536,9 @@ export async function processIncoming(eventId: string) {
           expiresAt: new Date(Date.now() + 30 * 60000),
         },
       });
+      // PostgreSQL now() is identical throughout a transaction. Give this batch an
+      // explicit order so recovery and immediate dispatch both leave the code last.
+      const outgoingAt = Date.now();
       if (response)
         await tx.message.upsert({
           where: { key: `reply-${event.key}` },
@@ -533,6 +547,7 @@ export async function processIncoming(eventId: string) {
             customerId: customer.id,
             instanceName: instance.name,
             direction: 'OUT',
+            createdAt: new Date(outgoingAt),
             encryptedText: encrypt(response),
             ...(interactive ? { encryptedInteractive: encrypt(JSON.stringify(interactive)) } : {}),
           },
@@ -546,9 +561,23 @@ export async function processIncoming(eventId: string) {
             customerId: customer.id,
             instanceName: instance.name,
             direction: 'OUT',
+            createdAt: new Date(outgoingAt + 1),
             encryptedText: encrypt('Escaneie o QR Code para pagar o Pix.'),
             encryptedMedia: encrypt(qr),
             mediaType: 'image',
+          },
+          update: {},
+        });
+      if (pixCode)
+        await tx.message.upsert({
+          where: { key: `pix-code-${event.key}` },
+          create: {
+            key: `pix-code-${event.key}`,
+            customerId: customer.id,
+            instanceName: instance.name,
+            direction: 'OUT',
+            createdAt: new Date(outgoingAt + 2),
+            encryptedText: encrypt(pixCode),
           },
           update: {},
         });

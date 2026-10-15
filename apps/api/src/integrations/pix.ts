@@ -5,7 +5,7 @@ import { AppError } from '../core/errors.js';
 import { equalSecret } from '../core/crypto.js';
 import { credentials, setting } from '../core/settings.js';
 import { env } from '../config.js';
-export type PixPayer = { email: string; cpf: string; name?: string };
+export type PixPayer = { email?: string; cpf?: string; name?: string };
 export type PixRequest = { reference: string; amount: string; payer: PixPayer; expiresAt: Date };
 export type PixCharge = {
   id: string;
@@ -21,6 +21,7 @@ export type PixCharge = {
 };
 export interface PixGateway {
   name: string;
+  requiresPayerDetails: boolean;
   buildRequest(input: PixRequest): Promise<string>;
   create(body: string, idempotencyKey: string): Promise<PixCharge>;
   get(id: string): Promise<PixCharge>;
@@ -75,7 +76,16 @@ export function verifyMpSignature(
 }
 export class MercadoPagoGateway implements PixGateway {
   name = 'mercadopago';
+  requiresPayerDetails = true;
   async buildRequest(input: PixRequest) {
+    if (
+      !z.string().email().safeParse(input.payer.email).success ||
+      !z
+        .string()
+        .regex(/^\d{11}$/)
+        .safeParse(input.payer.cpf).success
+    )
+      throw new AppError('PIX_PAYER_REQUIRED', 'O Mercado Pago exige e-mail e CPF do pagador.');
     return `{"transaction_amount":${input.amount},"payment_method_id":"pix","external_reference":${JSON.stringify(input.reference)},"description":"Depósito na carteira","notification_url":${JSON.stringify(`${env.PUBLIC_API_URL}/webhooks/pix?source_news=webhooks`)},"date_of_expiration":${JSON.stringify(input.expiresAt.toISOString())},"payer":${JSON.stringify({ email: input.payer.email, identification: { type: 'CPF', number: input.payer.cpf } })}}`;
   }
   async call(path: string, method = 'GET', body?: string, key?: string): Promise<PixCharge> {
@@ -177,6 +187,7 @@ export function parseExpayCharge(payload: unknown): PixCharge {
 }
 export class ExpayGateway implements PixGateway {
   name = 'expay';
+  requiresPayerDetails = false;
   async buildRequest(input: PixRequest) {
     const storeId = await setting('pix.expayStoreId', env.EXPAY_STORE_ID);
     const fields = JSON.stringify({

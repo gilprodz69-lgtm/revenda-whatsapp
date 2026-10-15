@@ -778,6 +778,135 @@ describe('Expay Brasil', () => {
     await saveSetting('pix.gateway', 'expay');
     await saveSetting('secret.expayApiKey', 'TEST-EXPAY-KEY-NEVER-REAL', true);
   }
+  async function receivePix(text: string) {
+    const event = await db.webhookEvent.create({
+      data: {
+        key: randomUUID(),
+        source: 'evolution',
+        encryptedPayload: encrypt(
+          JSON.stringify({
+            instance: 'store',
+            data: {
+              key: { id: randomUUID(), remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+              message: { conversation: text },
+            },
+          }),
+        ),
+      },
+    });
+    await processIncoming(event.id);
+    return event;
+  }
+  function mockPixCharge() {
+    const gatewayId = randomUUID();
+    let reference = '',
+      amount = 0;
+    const fetch = vi.fn(async (_url: string | URL | Request, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        const body = JSON.parse(String(options.body));
+        reference = body.reference;
+        amount = body.amount;
+      }
+      return new Response(
+        JSON.stringify({
+          charge_id: gatewayId,
+          reference,
+          amount,
+          currency: 'BRL',
+          payment_method: 'pix',
+          status: 'pending',
+          pix_data: { copy_paste: '000201-PIX-TEST-ONLY', qr_code_base64: 'aW1hZ2U=' },
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  }
+  it.each(['interactive', 'text'])(
+    'gera após o valor e envia copia e cola sozinho em modo %s',
+    async (style) => {
+      await configured();
+      await saveSetting('bot.messageStyle', style);
+      const fetch = mockPixCharge();
+      await receivePix('oi');
+      await receivePix('3');
+      const event = await receivePix('10,25');
+      // Duplicate webhook processing must not create another charge or another code message.
+      await processIncoming(event.id);
+      expect(await db.payment.count()).toBe(1);
+      expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+      const request = JSON.parse(String(fetch.mock.calls[0]![1]!.body));
+      expect(request.amount).toBe(10.25);
+      expect(request.customer).toEqual({ name: 'Cliente' });
+      const messages = await db.message.findMany({
+        where: {
+          key: { in: [`reply-${event.key}`, `pix-qr-${event.key}`, `pix-code-${event.key}`] },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(messages.map((message) => message.key)).toEqual([
+        `reply-${event.key}`,
+        `pix-qr-${event.key}`,
+        `pix-code-${event.key}`,
+      ]);
+      expect(decrypt(messages[0]!.encryptedText)).toContain('mensagem separada');
+      expect(decrypt(messages[0]!.encryptedText)).not.toContain('000201-PIX-TEST-ONLY');
+      if (messages[0]!.encryptedInteractive)
+        expect(decrypt(messages[0]!.encryptedInteractive)).not.toContain('000201-PIX-TEST-ONLY');
+      const code = messages[2]!;
+      expect(decrypt(code.encryptedText)).toBe('000201-PIX-TEST-ONLY');
+      expect(code.encryptedInteractive).toBeNull();
+      expect(code.encryptedMedia).toBeNull();
+      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+      const send = vi
+        .spyOn(evolution, 'sendText')
+        .mockResolvedValue({ key: { id: 'pix-code-sent' } });
+      const interactive = vi.spyOn(evolution, 'sendInteractive');
+      await dispatchMessage(code.id);
+      expect(send).toHaveBeenCalledWith('store', '5511999999999', '000201-PIX-TEST-ONLY');
+      expect(interactive).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['DEPOSIT_EMAIL', 'DEPOSIT_CPF'])(
+    'continua sessões antigas em %s sem pedir dados opcionais',
+    async (step) => {
+      await configured();
+      const fetch = mockPixCharge();
+      await db.conversation.create({
+        data: {
+          customerId,
+          instanceName: 'store',
+          expiresAt: new Date(Date.now() + 60000),
+          state: { step, amount: '20.00', depositKey: 'legacy-deposit' },
+        },
+      });
+      await receivePix('continuar');
+      expect((await db.payment.findFirstOrThrow()).idempotencyKey).toBe('legacy-deposit');
+      expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body)).customer).toEqual({
+        name: 'Cliente',
+      });
+      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+    },
+  );
+  it('mantém coleta e validação reais quando o gateway é Mercado Pago', async () => {
+    await saveSetting('pix.gateway', 'mercadopago');
+    await receivePix('oi');
+    await receivePix('3');
+    await receivePix('20');
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({
+      step: 'DEPOSIT_EMAIL',
+    });
+    await receivePix('sem-email');
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({
+      step: 'DEPOSIT_EMAIL',
+    });
+    await receivePix('test@example.com');
+    await receivePix('12345678901');
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'DEPOSIT_CPF' });
+    expect(await db.payment.count()).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('cria Pix pela API atual e credita uma única vez com reconciliações concorrentes', async () => {
     await configured();
     const gatewayId = randomUUID();
