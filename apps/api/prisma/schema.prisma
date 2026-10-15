@@ -18,6 +18,8 @@ enum OrderStatus {
   FAILED
   REVIEW
   REFUNDED
+  PARTIAL
+  CANCELLED
 }
 enum PaymentStatus {
   CREATING
@@ -99,12 +101,25 @@ model Provider {
 }
 model Product {
   slug String @id
-  externalId Int @unique
+  externalId Int? @unique
   code String?
   name String
-  providerKey String
+  providerKey String?
   displayName String?
-  provider Provider @relation(fields: [providerKey], references: [key])
+  provider Provider? @relation(fields: [providerKey], references: [key])
+  source String @default("PARTNER")
+  categoryId String?
+  category Category? @relation(fields: [categoryId], references: [id])
+  smmProviderId String?
+  smmProvider SmmProvider? @relation(fields: [smmProviderId], references: [id])
+  smmServiceId String?
+  smmType String?
+  supplierRate Decimal? @db.Decimal(18, 8)
+  costCurrency String @default("USD")
+  priceBasis Int @default(1)
+  minQuantity Int @default(1)
+  supportsRefill Boolean @default(false)
+  supportsCancel Boolean @default(false)
   catalogPriceUsd Decimal @db.Decimal(18, 4)
   costUsd Decimal @db.Decimal(18, 4)
   deliveryType String
@@ -132,6 +147,29 @@ model Product {
   items OrderItem[]
   @@index([providerKey, available, active])
   @@index([archivedAt])
+  @@unique([smmProviderId, smmServiceId])
+  @@index([categoryId, active, visible])
+}
+model Category {
+  id String @id @default(uuid())
+  sourceKey String? @unique
+  name String
+  description String @default("")
+  sortOrder Int @default(0)
+  active Boolean @default(true)
+  products Product[]
+}
+model SmmProvider {
+  id String @id @default(uuid())
+  name String @unique
+  url String
+  encryptedApiKey String
+  currency String @default("USD")
+  active Boolean @default(true)
+  requestsPerMinute Int @default(60)
+  createdAt DateTime @default(now())
+  products Product[]
+  orders Order[]
 }
 model ExchangeRate {
   id String @id @default(uuid())
@@ -156,9 +194,22 @@ model Order {
   estimatedCostUsd Decimal @db.Decimal(18, 4)
   actualCostUsd Decimal? @db.Decimal(18, 4)
   grossProfitBrl Decimal? @db.Decimal(18, 2)
-  exchangeRateId String
-  exchangeRate ExchangeRate @relation(fields: [exchangeRateId], references: [id])
-  usdBrl Decimal @db.Decimal(18, 8)
+  exchangeRateId String?
+  exchangeRate ExchangeRate? @relation(fields: [exchangeRateId], references: [id])
+  usdBrl Decimal? @db.Decimal(18, 8)
+  source String @default("PARTNER")
+  estimatedCostBrl Decimal? @db.Decimal(18, 4)
+  actualCostBrl Decimal? @db.Decimal(18, 4)
+  refundedBrl Decimal @default(0) @db.Decimal(18, 2)
+  smmProviderId String?
+  smmProvider SmmProvider? @relation(fields: [smmProviderId], references: [id])
+  smmOrderId String?
+  smmState String?
+  smmRemains Int?
+  lastSmmPollAt DateTime?
+  encryptedSmmRequest String?
+  smmRefillId String?
+  smmRefillState String?
   requestBody Json
   reservationSettled Boolean @default(false)
   errorCode String?
@@ -170,6 +221,7 @@ model Order {
   deliveries Delivery[]
   @@index([status, updatedAt])
   @@index([customerId, createdAt])
+  @@unique([smmProviderId, smmOrderId])
 }
 model OrderItem {
   id String @id @default(uuid())
@@ -179,6 +231,7 @@ model OrderItem {
   product Product @relation(fields: [productSlug], references: [slug])
   name String
   quantity Int
+  priceBasis Int @default(1)
   unitSaleBrl Decimal @db.Decimal(18, 2)
   unitCostUsd Decimal @db.Decimal(18, 4)
 }

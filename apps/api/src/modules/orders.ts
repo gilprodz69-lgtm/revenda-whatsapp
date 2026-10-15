@@ -9,11 +9,22 @@ import { mutateWallet } from './wallet.js';
 import { currentRate } from './exchange.js';
 import { priceQuote, type Tier } from './pricing.js';
 import { messageTemplate } from './templates.js';
+import { quoteSmmProduct, placeSmmOrder, processSmmOrder } from './smm-orders.js';
 
 export async function quoteProduct(slug: string, quantity: number) {
-  const local = await db.product.findUniqueOrThrow({ where: { slug } });
-  if (local.archivedAt || !local.active || !local.visible || !local.authorizedResale)
+  const local = await db.product.findUniqueOrThrow({
+    where: { slug },
+    include: { category: true },
+  });
+  if (
+    local.archivedAt ||
+    !local.active ||
+    !local.visible ||
+    !local.authorizedResale ||
+    local.category?.active === false
+  )
     throw new AppError('PRODUCT_UNAVAILABLE', 'Este produto não está disponível para venda.');
+  if (local.source === 'SMM') return quoteSmmProduct(local, quantity);
   const live = await partner.product(slug);
   if (live.currency !== 'USD')
     throw new AppError(
@@ -55,7 +66,10 @@ export async function placeOrder(input: {
   quantity: number;
   idempotencyKey: string;
   expectedTotalBrl: string;
+  details?: Record<string, string>;
 }) {
+  const listing = await db.product.findUniqueOrThrow({ where: { slug: input.slug } });
+  if (listing.source === 'SMM') return placeSmmOrder(input, listing);
   const prior = await db.order.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (prior) {
     const priorBody = prior.requestBody as { productSlug: string; quantity: number };
@@ -97,8 +111,17 @@ export async function placeOrder(input: {
     }
     const customer = await tx.customer.findUniqueOrThrow({ where: { id: input.customerId } });
     if (customer.blocked) throw new AppError('CUSTOMER_BLOCKED', 'Conta bloqueada para compras.');
-    const local = await tx.product.findUniqueOrThrow({ where: { slug: input.slug } });
-    if (local.archivedAt || !local.active || !local.visible || !local.authorizedResale)
+    const local = await tx.product.findUniqueOrThrow({
+      where: { slug: input.slug },
+      include: { category: true },
+    });
+    if (
+      local.archivedAt ||
+      !local.active ||
+      !local.visible ||
+      !local.authorizedResale ||
+      local.category?.active === false
+    )
       throw new AppError('PRODUCT_UNAVAILABLE', 'Produto desativado.');
     const order = await tx.order.create({
       data: {
@@ -109,8 +132,8 @@ export async function placeOrder(input: {
         instanceName: input.instanceName,
         totalBrl: quote.totalBrl,
         estimatedCostUsd: quote.estimatedCostUsd,
-        usdBrl: quote.rate.usdBrl,
-        exchangeRateId: quote.rate.id,
+        usdBrl: quote.rate!.usdBrl,
+        exchangeRateId: quote.rate!.id,
         requestBody: {
           productSlug: input.slug,
           quantity: input.quantity,
@@ -157,6 +180,7 @@ async function finalizeOrder(orderId: string, external: PartnerOrder) {
       external.product.slug !== body.productSlug
     )
       throw new AppError('PARTNER_CONTRACT_MISMATCH', 'Resposta externa divergente.', 503);
+    if (!order.usdBrl) throw new AppError('INVALID_RATE', 'Cotação do pedido ausente.', 503);
     const profit = order.totalBrl.sub(new Prisma.Decimal(external.totalCharged).mul(order.usdBrl));
     await mutateWallet(tx, {
       customerId: order.customerId,
@@ -192,7 +216,7 @@ async function finalizeOrder(orderId: string, external: PartnerOrder) {
     });
   });
 }
-async function failOrder(orderId: string, code: string) {
+export async function failOrder(orderId: string, code: string) {
   return transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`;
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
@@ -225,6 +249,7 @@ async function failOrder(orderId: string, code: string) {
 }
 export async function processOrder(id: string) {
   const order = await db.order.findUniqueOrThrow({ where: { id }, include: { attempts: true } });
+  if (order.source === 'SMM') return processSmmOrder(id);
   if (order.reservationSettled || ['FAILED', 'REFUNDED', 'REVIEW'].includes(order.status)) return;
   const hadPurchase = order.attempts.some((a) => a.operation === 'PURCHASE');
   const body = order.requestBody as {
@@ -329,7 +354,7 @@ export async function refundOrder(id: string, reason: string, actorId: string) {
     await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id} FOR UPDATE`;
     const order = await tx.order.findUniqueOrThrow({ where: { id } });
     if (order.status === 'REFUNDED') return order;
-    if (order.status !== 'COMPLETED')
+    if (!['COMPLETED', 'PARTIAL'].includes(order.status))
       throw new AppError('INVALID_REFUND', 'Só é possível estornar pedidos concluídos.', 409);
     const deliveries = await tx.delivery.findMany({ where: { orderId: id } });
     if (deliveries.some((d) => d.status === 'SENDING' || d.status === 'UNKNOWN'))
@@ -353,7 +378,7 @@ export async function refundOrder(id: string, reason: string, actorId: string) {
       customerId: order.customerId,
       key: `refund-${id}`,
       kind: 'REFUND',
-      availableDelta: order.totalBrl.toString(),
+      availableDelta: order.totalBrl.sub(order.refundedBrl).toString(),
       reservedDelta: '0',
       reference: id,
       reason,
@@ -365,7 +390,10 @@ export async function refundOrder(id: string, reason: string, actorId: string) {
       where: { id },
       data: {
         status: 'REFUNDED',
-        grossProfitBrl: order.actualCostUsd?.mul(order.usdBrl).negated(),
+        refundedBrl: order.totalBrl,
+        grossProfitBrl:
+          order.actualCostBrl?.negated() ??
+          (order.usdBrl ? order.actualCostUsd?.mul(order.usdBrl).negated() : null),
       },
     });
   });

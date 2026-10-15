@@ -97,7 +97,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   vi.restoreAllMocks();
   await db.$executeRawUnsafe(
-    'TRUNCATE "AdminSession","Admin","AuditLog","ApiRequestLog","WebhookEvent","Delivery","OrderAttempt","OrderItem","Order","Payment","LedgerEntry","Wallet","Message","Conversation","Customer","Product","Provider","WhatsappInstance","ExchangeRate","Setting" CASCADE',
+    'TRUNCATE "AdminSession","Admin","AuditLog","ApiRequestLog","WebhookEvent","Delivery","OrderAttempt","OrderItem","Order","Payment","LedgerEntry","Wallet","Message","Conversation","Customer","Product","Provider","Category","SmmProvider","WhatsappInstance","ExchangeRate","Setting" CASCADE',
   );
   await redis.flushdb();
   await db.whatsappInstance.create({ data: { name: 'store', state: 'open' } });

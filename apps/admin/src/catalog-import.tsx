@@ -16,6 +16,9 @@ type Service = {
   stock: number;
   available: boolean;
   imported: boolean;
+  priceBasis?: number;
+  minQuantity?: number;
+  unsupportedReason?: string;
 };
 type Catalog = {
   data: Service[];
@@ -29,11 +32,16 @@ export function CatalogImport({
   onClose,
   onImported,
   onError,
+  smmProvider,
 }: {
   onClose: () => void;
   onImported: (count: number) => Promise<void>;
   onError: (error: unknown) => void;
+  smmProvider?: { id: string; name: string };
 }) {
+  const endpoint = smmProvider ? `/smm-providers/${smmProvider.id}` : '/products';
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [categoryId, setCategoryId] = useState('');
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [provider, setProvider] = useState('');
@@ -62,7 +70,7 @@ export function CatalogImport({
       page: String(page),
       limit: '25',
     });
-    void api<Catalog>(`/products/catalog?${params}`)
+    void api<Catalog>(`${endpoint}/catalog?${params}`)
       .then((result) => {
         if (active) setCatalog(result);
       })
@@ -78,7 +86,13 @@ export function CatalogImport({
     return () => {
       active = false;
     };
-  }, [query, provider, page, reload, onError]);
+  }, [query, provider, page, reload, onError, endpoint]);
+  useEffect(() => {
+    if (smmProvider)
+      void api<{ data: { id: string; name: string }[] }>('/categories')
+        .then((r) => setCategories(r.data))
+        .catch(onError);
+  }, [endpoint, onError]);
   const available = catalog?.data.filter((service) => !service.imported && service.canImport) ?? [];
   const allSelected =
     available.length > 0 && available.every((service) => selected.has(service.slug));
@@ -86,7 +100,11 @@ export function CatalogImport({
   return (
     <EditorDialog
       title="Importar serviços"
-      description="Escolha os produtos da Partner que deseja adicionar à sua loja."
+      description={
+        smmProvider
+          ? `Selecione serviços de ${smmProvider.name} e organize na sua loja.`
+          : 'Escolha os produtos da Partner que deseja adicionar à sua loja.'
+      }
       icon={Download}
       onClose={onClose}
       busy={busy}
@@ -104,8 +122,9 @@ export function CatalogImport({
               setBusy(true);
               setError('');
               try {
-                const result = await api<{ imported: number }>('/products/import', 'POST', {
+                const result = await api<{ imported: number }>(`${endpoint}/import`, 'POST', {
                   slugs: [...selected.keys()],
+                  ...(smmProvider && categoryId ? { categoryId } : {}),
                 });
                 await onImported(result.imported);
               } catch (err) {
@@ -125,6 +144,23 @@ export function CatalogImport({
       }
     >
       <div className="catalog-import">
+        {smmProvider && (
+          <label className="field">
+            <span>Categoria da loja</span>
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              disabled={busy}
+            >
+              <option value="">Criar/manter categorias do catálogo</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="import-filters">
           <label className="field">
             <span>Buscar serviços</span>
@@ -182,7 +218,7 @@ export function CatalogImport({
           {loading ? (
             <div className="import-empty" role="status">
               <LoaderCircle className="spin" size={24} />
-              Consultando catálogo da Partner…
+              Consultando catálogo {smmProvider ? 'SMM' : 'da Partner'}…
             </div>
           ) : !catalog?.data.length ? (
             <div className="import-empty">
@@ -230,6 +266,7 @@ export function CatalogImport({
                   <strong>{service.name}</strong>
                   <small>
                     {service.provider.name} · {service.code || service.slug}
+                    {smmProvider && ` · Mín. ${service.minQuantity} · Máx. ${service.stock}`}
                   </small>
                 </span>
                 <span className="import-service-cost">
@@ -237,13 +274,18 @@ export function CatalogImport({
                     {service.currency === 'USD' ? 'US$' : service.currency}{' '}
                     {new Decimal(service.cost).toFixed(2).replace('.', ',')}
                   </b>
+                  {smmProvider && (
+                    <small>por {service.priceBasis === 1 ? 'pacote' : '1.000 unidades'}</small>
+                  )}
                   <small>
                     {!service.canImport
-                      ? 'Moeda sem suporte para importação'
+                      ? (service.unsupportedReason ?? 'Moeda sem suporte para importação')
                       : service.imported
                         ? 'Já importado'
                         : service.available
-                          ? `${service.stock} em estoque`
+                          ? smmProvider
+                            ? 'Sob demanda'
+                            : `${service.stock} em estoque`
                           : 'Sem estoque'}
                   </small>
                 </span>
@@ -300,9 +342,10 @@ export function CatalogImport({
         )}
         <p className="import-help">
           Os serviços serão adicionados para revisão. Depois de importar, defina o preço e autorize
-          a revenda em Editar → Disponibilidade. Até 100 serviços por importação. A importação nesta
-          versão suporta USD. Serviços em USDT ou outras moedas são exibidos com a moeda original e
-          ficam indisponíveis para seleção.
+          a revenda em Editar → Disponibilidade. Até 100 serviços por importação.
+          {smmProvider
+            ? ' SMM avulso: o preço é por 1.000 unidades ou por pacote, conforme indicado. Assinaturas automáticas não são importadas.'
+            : ' A importação Partner suporta USD. Serviços em USDT ou outras moedas ficam indisponíveis para seleção.'}
         </p>
       </div>
     </EditorDialog>

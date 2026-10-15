@@ -1,6 +1,6 @@
 name: ${COMPOSE_PROJECT_NAME:-revenda}
 x-app: &app
-  image: revenda-api:1.0.8
+  image: revenda-api:1.1.0
   build: { context: ., dockerfile: apps/api/Dockerfile }
   environment: &app-env
     NODE_ENV: ${NODE_ENV:-production}
@@ -181,7 +181,7 @@ services:
       }
     logging: { driver: json-file, options: { max-size: 10m, max-file: '3' } }
   admin:
-    image: revenda-admin:1.0.8
+    image: revenda-admin:1.1.0
     build: { context: ., dockerfile: apps/admin/Dockerfile }
     networks: [private]
     restart: unless-stopped

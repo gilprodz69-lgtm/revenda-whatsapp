@@ -19,6 +19,18 @@ async function mockApi(page: Page, loggedIn = true) {
   const secrets: Record<string, boolean> = {};
   let productDeleted = false;
   let productEdits: Record<string, unknown> = {};
+  let smmProviders: Record<string, any>[] = [];
+  let categories: Record<string, any>[] = [
+    {
+      id: 'cat-1',
+      name: 'Instagram',
+      description: '',
+      sortOrder: 0,
+      active: true,
+      _count: { products: 0 },
+    },
+  ];
+  const smmImported = new Set<string>();
   let rates: Record<string, unknown>[] = [];
   const refreshRate = () => {
     rates = [
@@ -55,6 +67,86 @@ async function mockApi(page: Page, loggedIn = true) {
     } else if (url.pathname === '/api/auth/login') {
       loggedIn = true;
       body = { admin, csrf: 'test' };
+    } else if (url.pathname === '/api/categories') {
+      if (req.method() === 'POST') {
+        const row = {
+          id: `cat-${categories.length + 1}`,
+          ...req.postDataJSON(),
+          _count: { products: 0 },
+        };
+        categories.push(row);
+        body = row;
+      } else body = { data: categories };
+    } else if (url.pathname.startsWith('/api/categories/')) {
+      const id = url.pathname.split('/').at(-1);
+      if (req.method() === 'DELETE') categories = categories.filter((c) => c.id !== id);
+      else categories = categories.map((c) => (c.id === id ? { ...c, ...req.postDataJSON() } : c));
+      body = { ok: true };
+    } else if (url.pathname === '/api/smm-providers') {
+      if (req.method() === 'POST') {
+        const { apiKey: _key, ...values } = req.postDataJSON();
+        const row = {
+          id: 'smm-1',
+          ...values,
+          keyConfigured: true,
+          _count: { products: 0, orders: 0 },
+        };
+        smmProviders.push(row);
+        body = row;
+      } else body = { data: smmProviders };
+    } else if (url.pathname === '/api/smm-providers/smm-1/test')
+      body = { balance: '100.00', currency: 'USD' };
+    else if (url.pathname === '/api/smm-providers/smm-1/catalog')
+      body = {
+        data: [
+          {
+            slug: '1',
+            code: '1',
+            name: 'Curtidas SMM',
+            provider: { key: 'Instagram', name: 'Instagram' },
+            cost: '1',
+            currency: 'USD',
+            priceBasis: 1000,
+            minQuantity: 100,
+            stock: 10000,
+            canImport: true,
+            available: true,
+            imported: smmImported.has('1'),
+          },
+          {
+            slug: '2',
+            code: '2',
+            name: 'Assinatura automática',
+            provider: { key: 'Instagram', name: 'Instagram' },
+            cost: '1',
+            currency: 'USD',
+            priceBasis: 1000,
+            stock: 0,
+            canImport: false,
+            available: true,
+            imported: false,
+            unsupportedReason: 'Tipo Subscriptions ainda não compatível com a compra avulsa.',
+          },
+        ],
+        total: 2,
+        page: 1,
+        limit: 25,
+        providers: [{ key: 'Instagram', name: 'Instagram' }],
+      };
+    else if (url.pathname === '/api/smm-providers/smm-1/import') {
+      req.postDataJSON().slugs.forEach((id: string) => smmImported.add(id));
+      smmProviders = smmProviders.map((p) => ({
+        ...p,
+        _count: { products: smmImported.size, orders: 0 },
+      }));
+      body = { imported: req.postDataJSON().slugs.length };
+    } else if (url.pathname === '/api/smm-providers/smm-1') {
+      if (req.method() === 'DELETE') smmProviders = [];
+      else {
+        const { apiKey: _key, ...values } = req.postDataJSON();
+        smmProviders = smmProviders.map((p) => ({ ...p, ...values }));
+      }
+      body = { ok: true };
     } else if (url.pathname === '/api/dashboard') body = dashboard;
     else if (url.pathname === '/api/products/catalog') {
       const search = (url.searchParams.get('search') ?? '').toLowerCase();
@@ -173,6 +265,160 @@ test('login, dashboard, tema e navegação responsiva', async ({ page }) => {
   });
   await navigate(page, 'Pedidos');
   await expect(page.getByText('Nenhum registro encontrado')).toBeVisible();
+});
+
+test('cadastra provedor SMM, testa conexão, mantém chave salva e importa para uma categoria', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Provedores SMM');
+  await page.getByRole('button', { name: 'Novo provedor', exact: true }).click();
+  let dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nome', { exact: true }).fill('Machine SMM');
+  await dialog.getByLabel('URL da API SMM', { exact: true }).fill('https://machinesmm.com/api/v2');
+  await dialog.getByLabel('Chave da API SMM', { exact: true }).fill('TEST-KEY-NEVER-REAL');
+  const saved = page.waitForRequest(
+    (req) => req.method() === 'POST' && req.url().endsWith('/smm-providers'),
+  );
+  await dialog.getByRole('button', { name: 'Salvar', exact: true }).click();
+  expect((await saved).postDataJSON()).toMatchObject({
+    currency: 'USD',
+    active: true,
+    url: 'https://machinesmm.com/api/v2',
+  });
+  await expect(page.getByText('Machine SMM', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Testar conexão', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Conexão válida · Saldo USD 100.00');
+  await page.getByRole('button', { name: 'Editar Machine SMM', exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Chave da API SMM', { exact: true })).toHaveValue('');
+  await dialog.getByLabel('Nome', { exact: true }).fill('Machine SMM principal');
+  await dialog.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await page.getByRole('button', { name: 'Importar serviços', exact: true }).click();
+  dialog = page.getByRole('dialog', { name: 'Importar serviços', exact: true });
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Selecionar Assinatura automática', exact: true }),
+  ).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: 'Selecionar Curtidas SMM', exact: true }).check();
+  await dialog
+    .getByRole('combobox', { name: 'Categoria da loja', exact: true })
+    .selectOption('cat-1');
+  await page.screenshot({
+    path: `test-results/smm-import-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+  const imported = page.waitForRequest(
+    (req) => req.method() === 'POST' && req.url().endsWith('/smm-1/import'),
+  );
+  await dialog.getByRole('button', { name: 'Importar selecionados (1)', exact: true }).click();
+  expect((await imported).postDataJSON()).toEqual({ slugs: ['1'], categoryId: 'cat-1' });
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText('1 serviços · Chave configurada')).toBeVisible();
+  await page.reload();
+  await navigate(page, 'Provedores SMM');
+  await expect(page.getByText('Machine SMM principal', { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: `test-results/smm-providers-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+});
+
+test('cria, edita e oculta categorias e atribui o produto sem mudar o fornecedor', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto('/');
+  await navigate(page, 'Categorias');
+  await page.getByRole('button', { name: 'Nova categoria', exact: true }).click();
+  let dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nome', { exact: true }).fill('Serviços da loja');
+  await dialog.getByLabel('Descrição da categoria', { exact: true }).fill('Meus serviços digitais');
+  await dialog.getByLabel('Ordem de exibição', { exact: true }).fill('2');
+  await dialog.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await page.getByRole('button', { name: 'Editar Serviços da loja', exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nome', { exact: true }).fill('Minha categoria');
+  await dialog.getByLabel('Exibir categoria no WhatsApp', { exact: true }).uncheck();
+  await dialog.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByText('Oculto / desativado', { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: `test-results/categories-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await navigate(page, 'Produtos');
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await page.getByRole('tab', { name: 'Apresentação', exact: true }).click();
+  await page
+    .getByRole('combobox', { name: 'Categoria no WhatsApp', exact: true })
+    .selectOption('cat-1');
+  const changed = page.waitForRequest(
+    (req) => req.method() === 'PATCH' && req.url().endsWith('/products/authorized-product'),
+  );
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  expect((await changed).postDataJSON()).toMatchObject({
+    categoryId: 'cat-1',
+    authorizedResale: true,
+  });
+});
+
+test('identifica preço SMM por mil e mantém o catálogo Partner junto dos serviços', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.route('**/api/products?**', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [
+          {
+            slug: 'smm-test-1',
+            name: 'Curtidas da loja',
+            source: 'SMM',
+            smmProvider: { name: 'Machine SMM', active: true },
+            category: { name: 'Instagram', active: true },
+            categoryId: 'cat-1',
+            costCurrency: 'USD',
+            supplierRate: '1',
+            priceBasis: 1000,
+            minQuantity: 100,
+            maxQuantity: 10000,
+            active: true,
+            visible: true,
+            available: true,
+            authorizedResale: true,
+            markupPercent: '100',
+            fixedMargin: '0',
+            roundingStep: '0.01',
+            volumeDiscountPercent: '0',
+            volumeMinQuantity: 10000,
+            quote: { unitSaleBrl: '10', estimatedProfitBrl: '5' },
+          },
+        ],
+        total: 1,
+      }),
+    }),
+  );
+  await page.goto('/');
+  await navigate(page, 'Produtos');
+  await expect(page.getByText('Venda por 1.000 unidades', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await page.getByLabel('Preço manual por 1.000 (R$)', { exact: true }).fill('15');
+  await page.screenshot({
+    path: `test-results/smm-pricing-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  await page.getByRole('button', { name: 'Importar serviços', exact: true }).click();
+  await expect(
+    page
+      .getByRole('dialog')
+      .getByText('Escolha os produtos da Partner que deseja adicionar à sua loja.'),
+  ).toBeVisible();
 });
 
 test('distingue modo salvo de cotação válida e consulta BCB em ambos os modos', async ({

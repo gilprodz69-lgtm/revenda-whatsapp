@@ -27,6 +27,8 @@ import {
   Plus,
   Download,
   Trash2,
+  FolderTree,
+  Network,
 } from 'lucide-react';
 import { api, HttpError, type Row } from './api';
 import './style.css';
@@ -36,6 +38,7 @@ import './glow';
 import { EditorDialog, ProductFields } from './editor';
 import { CatalogImport } from './catalog-import';
 import { EvolutionActivation, activationReturn } from './evolution-activation';
+import { CatalogManagement } from './catalog-management';
 const brl = (v: unknown) => `R$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const usd = (v: unknown) => `US$ ${new Decimal(String(v ?? 0)).toFixed(2).replace('.', ',')}`;
 const date = (v: unknown) => (v ? new Date(String(v)).toLocaleString('pt-BR') : '—');
@@ -47,6 +50,7 @@ const statusLabels: Record<string, string> = {
   FAILED: 'Falhou',
   REVIEW: 'Revisão manual',
   REFUNDED: 'Estornado',
+  PARTIAL: 'Concluído parcialmente',
   CREATING: 'Criando cobrança',
   PENDING: 'Pendente',
   APPROVED: 'Aprovado',
@@ -72,6 +76,8 @@ function Badge({ value }: { value: string }) {
 const navigation = [
   { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard },
   { id: 'products', label: 'Produtos', icon: Package },
+  { id: 'categories', label: 'Categorias', icon: FolderTree },
+  { id: 'smm-providers', label: 'Provedores SMM', icon: Network },
   { id: 'customers', label: 'Clientes', icon: Users },
   { id: 'orders', label: 'Pedidos', icon: ShoppingBag },
   { id: 'payments', label: 'Depósitos Pix', icon: Wallet },
@@ -301,6 +307,7 @@ function App() {
           visible: f.has('visible'),
           displayName: get('displayName').trim() || null,
           description: get('description').trim() || null,
+          categoryId: get('categoryId') || null,
           authorizedResale: f.has('authorizedResale'),
           markupPercent: get('markupPercent'),
           fixedMargin: get('fixedMargin'),
@@ -449,7 +456,10 @@ function App() {
             <span className="nav-label">ADMINISTRAÇÃO</span>
             <nav>
               {navigation
-                .filter((n) => canConfigure || !['settings', 'logs', 'admins'].includes(n.id))
+                .filter(
+                  (n) =>
+                    canConfigure || !['settings', 'logs', 'admins', 'smm-providers'].includes(n.id),
+                )
                 .map((n) => (
                   <button
                     key={n.id}
@@ -777,6 +787,15 @@ function App() {
                       )}
                     </section>
                   )}
+                  {['categories', 'smm-providers'].includes(page) && (
+                    <CatalogManagement
+                      kind={page as 'categories' | 'smm-providers'}
+                      rows={rows}
+                      canEdit={canConfigure}
+                      refresh={load}
+                      onError={report}
+                    />
+                  )}
                   {['products', 'customers', 'orders', 'payments'].includes(page) && (
                     <section className="card list-card">
                       <div className="list-toolbar">
@@ -821,6 +840,8 @@ function App() {
                                     'FAILED',
                                     'REVIEW',
                                     'REFUNDED',
+                                    'PARTIAL',
+                                    'CANCELLED',
                                   ].includes(key),
                                 )
                                 .map(([key, label]) => (
@@ -838,7 +859,7 @@ function App() {
                           [
                             'Produto',
                             'Fornecedor',
-                            'Custo USD',
+                            'Custo do fornecedor',
                             'Estoque',
                             'Venda / lucro estimado',
                             '',
@@ -849,19 +870,41 @@ function App() {
                                 <b>{r.name}</b>
                                 <small>{r.slug}</small>
                               </td>
-                              <td>{r.provider.name}</td>
                               <td>
-                                {usd(r.costUsd)}
-                                <small>Catálogo: {usd(r.catalogPriceUsd)}</small>
+                                {r.provider?.name ?? r.smmProvider?.name}
+                                <small>{r.category?.name ?? 'Categoria original'}</small>
                               </td>
                               <td>
-                                {r.stock}
-                                <small>Máx. {r.maxQuantity}</small>
+                                {r.source === 'SMM' ? (
+                                  <>
+                                    {r.costCurrency} {r.supplierRate}
+                                    <small>
+                                      por {r.priceBasis === 1 ? 'pacote' : '1.000 unidades'}
+                                    </small>
+                                  </>
+                                ) : (
+                                  <>
+                                    {usd(r.costUsd)}
+                                    <small>Catálogo: {usd(r.catalogPriceUsd)}</small>
+                                  </>
+                                )}
+                              </td>
+                              <td>
+                                {r.source === 'SMM' ? 'Sob demanda' : r.stock}
+                                <small>
+                                  {r.source === 'SMM' && `Mín. ${r.minQuantity} · `}Máx.{' '}
+                                  {r.maxQuantity}
+                                </small>
                               </td>
                               <td>
                                 <Badge
                                   value={
-                                    r.available && r.active && r.visible && r.authorizedResale
+                                    r.available &&
+                                    r.active &&
+                                    r.visible &&
+                                    r.authorizedResale &&
+                                    r.category?.active !== false &&
+                                    r.smmProvider?.active !== false
                                       ? 'open'
                                       : 'close'
                                   }
@@ -872,6 +915,11 @@ function App() {
                                     : 'Configure a cotação'}{' '}
                                   · {r.markupPercent}% {!r.authorizedResale && '· Revenda pendente'}
                                 </small>
+                                {r.source === 'SMM' && (
+                                  <small>
+                                    Venda por {r.priceBasis === 1 ? 'pacote' : '1.000 unidades'}
+                                  </small>
+                                )}
                               </td>
                               <td>
                                 {canConfigure && (
@@ -1580,7 +1628,7 @@ function App() {
               )}
               <footer className="content-footer">
                 <span>Revenda · Central de operações</span>
-                <span>Valores financeiros em BRL · Fornecedor em USD</span>
+                <span>Valores financeiros em BRL · Custos na moeda do provedor</span>
               </footer>
             </main>
           </div>
@@ -1790,11 +1838,17 @@ function App() {
                       </div>
                       <div>
                         <dt>Custo realizado</dt>
-                        <dd>{detail.actualCostUsd ? usd(detail.actualCostUsd) : 'Pendente'}</dd>
+                        <dd>
+                          {detail.actualCostBrl
+                            ? brl(detail.actualCostBrl)
+                            : detail.actualCostUsd
+                              ? usd(detail.actualCostUsd)
+                              : 'Pendente'}
+                        </dd>
                       </div>
                       <div>
                         <dt>Cotação utilizada</dt>
-                        <dd>R$ {detail.usdBrl}</dd>
+                        <dd>{detail.usdBrl ? `R$ ${detail.usdBrl}` : 'Custo em BRL'}</dd>
                       </div>
                       <div>
                         <dt>Lucro bruto</dt>
@@ -1858,6 +1912,71 @@ function App() {
                         )}
                       </div>
                     ))}
+                    {detail.source === 'SMM' && (
+                      <section className="permission-box stack">
+                        <h3>Acompanhamento SMM</h3>
+                        <p>
+                          Pedido no provedor: {detail.smmOrderId ?? 'Não identificado'} ·{' '}
+                          {detail.smmState ?? 'Aguardando envio'}
+                        </p>
+                        {detail.targetLink && (
+                          <p style={{ overflowWrap: 'anywhere' }}>Destino: {detail.targetLink}</p>
+                        )}
+                        <p>
+                          Restantes: {detail.smmRemains ?? 'Aguardando'} · Devolvido:{' '}
+                          {brl(detail.refundedBrl)}
+                        </p>
+                        {canOperate && detail.smmOrderId && !detail.reservationSettled && (
+                          <button
+                            className="secondary"
+                            disabled={busy}
+                            onClick={() =>
+                              void act(`/orders/${detail.id}/smm/status`)
+                                .then(() => api(`/orders/${detail.id}`))
+                                .then(setDetail)
+                                .catch(() => {})
+                            }
+                          >
+                            Consultar status SMM
+                          </button>
+                        )}
+                        {canConfigure &&
+                          !detail.smmOrderId &&
+                          ['REVIEW', 'UNKNOWN'].includes(detail.status) && (
+                            <form
+                              className="stack"
+                              onSubmit={async (e) => {
+                                e.preventDefault();
+                                const f = new FormData(e.currentTarget);
+                                try {
+                                  await act(`/orders/${detail.id}/smm/link`, 'POST', {
+                                    externalId: f.get('externalId'),
+                                    confirmed: f.has('confirmed'),
+                                  });
+                                  setDetail(await api(`/orders/${detail.id}`));
+                                } catch {}
+                              }}
+                            >
+                              <p>
+                                O envio não será repetido. Confira no painel do provedor e vincule o
+                                pedido já criado.
+                              </p>
+                              <Field
+                                name="externalId"
+                                label="Número do pedido no provedor"
+                                required
+                              />
+                              <label className="toggle">
+                                <input type="checkbox" name="confirmed" required />
+                                <span>Conferi o serviço, link e quantidade no provedor.</span>
+                              </label>
+                              <button className="primary" disabled={busy}>
+                                Vincular pedido existente
+                              </button>
+                            </form>
+                          )}
+                      </section>
+                    )}
                     <h3>Tentativas de processamento</h3>
                     <div className="compact-list">
                       {detail.attempts.map((r: Row) => (

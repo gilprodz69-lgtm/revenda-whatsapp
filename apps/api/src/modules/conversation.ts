@@ -11,6 +11,7 @@ import { notifyOutgoing, notifyOrder } from '../core/dispatch.js';
 import { activationKeywords, matchesActivation } from './bot-activation.js';
 import { quoteProduct, placeOrder } from './orders.js';
 import { createDeposit } from './payments.js';
+import { smmDetailFields, validateSmmField } from './smm-orders.js';
 import { templates, messageTemplate } from './templates.js';
 import {
   interactionStateSchema,
@@ -37,6 +38,7 @@ export const stateSchema = z.object({
     'PRODUCTS',
     'QUANTITY',
     'CONFIRM',
+    'SMM_DETAILS',
     'DEPOSIT_AMOUNT',
     'DEPOSIT_EMAIL',
     'DEPOSIT_CPF',
@@ -53,6 +55,9 @@ export const stateSchema = z.object({
   depositKey: z.string().optional(),
   offset: z.number().optional(),
   quoteExpires: z.number().optional(),
+  smmType: z.string().optional(),
+  details: z.record(z.string()).optional(),
+  fieldIndex: z.number().int().min(0).optional(),
 });
 type State = z.infer<typeof stateSchema>;
 function acceptsStepInput(state: State, input: string) {
@@ -91,6 +96,16 @@ function acceptsStepInput(state: State, input: string) {
       return input.includes('@') || input === 'continuar';
     case 'DEPOSIT_CPF':
       return /^[\d.\-\s]+$/.test(input) || input === 'continuar';
+    case 'SMM_DETAILS': {
+      const key = smmDetailFields(state.smmType ?? '')[state.fieldIndex ?? 0]?.key;
+      return key === 'link'
+        ? /^https?:\/\//i.test(input)
+        : key === 'answer_number'
+          ? /^\d+$/.test(input)
+          : key === 'username'
+            ? /^[\w.\-]{1,100}$/.test(input)
+            : !!input;
+    }
   }
 }
 export function validCpf(cpf: string) {
@@ -289,23 +304,44 @@ export async function processIncoming(eventId: string) {
       return `${await messageTemplate('human')}\n${await setting('human.hours', 'Atendimento conforme disponibilidade da equipe.')}`;
     };
     const showProviders = async (offset = 0) => {
-      const providers = await db.provider.findMany({
-        where: {
-          products: {
-            some: {
-              archivedAt: null,
-              available: true,
-              active: true,
-              visible: true,
-              authorizedResale: true,
-              stock: { gt: 0 },
+      const sellable = {
+        archivedAt: null,
+        available: true,
+        active: true,
+        visible: true,
+        authorizedResale: true,
+        stock: { gt: 0 },
+        OR: [{ source: 'PARTNER' }, { source: 'SMM', smmProvider: { active: true } }],
+      };
+      const [categories, legacy] = await Promise.all([
+        db.category.findMany({ where: { active: true, products: { some: sellable } } }),
+        db.provider.findMany({
+          where: {
+            products: {
+              some: {
+                ...sellable,
+                categoryId: null,
+              },
             },
           },
-        },
-        orderBy: { sortOrder: 'asc' },
-        skip: offset,
-        take: 9,
-      });
+        }),
+      ]);
+      const providers = [
+        ...categories.map((c) => ({
+          key: c.id,
+          name: c.name,
+          sortOrder: c.sortOrder,
+          description: c.description,
+        })),
+        ...legacy.map((p) => ({
+          key: p.key,
+          name: p.name,
+          sortOrder: p.sortOrder,
+          description: '',
+        })),
+      ]
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'pt-BR'))
+        .slice(offset, offset + 9);
       state = {
         step: 'PROVIDERS',
         options: providers.slice(0, 8).map((p) => p.key),
@@ -323,7 +359,9 @@ export async function processIncoming(eventId: string) {
           'list',
           await messageTemplate('categories'),
           [
-            ...providers.slice(0, 8).map((p, i) => ({ value: String(i + 1), title: p.name })),
+            ...providers
+              .slice(0, 8)
+              .map((p, i) => ({ value: String(i + 1), title: p.name, description: p.description })),
             ...(providers.length > 8 ? [{ value: '9', title: 'Mais categorias' }] : []),
             { value: '0', title: 'Menu principal' },
           ],
@@ -334,7 +372,17 @@ export async function processIncoming(eventId: string) {
     const showProducts = async (provider: string, offset = 0) => {
       const products = await db.product.findMany({
         where: {
-          providerKey: provider,
+          AND: [
+            {
+              OR: [
+                { categoryId: provider },
+                { category: { sourceKey: `partner:${provider}` } },
+                { categoryId: null, providerKey: provider },
+              ],
+            },
+            { OR: [{ categoryId: null }, { category: { active: true } }] },
+            { OR: [{ source: 'PARTNER' }, { source: 'SMM', smmProvider: { active: true } }] },
+          ],
           archivedAt: null,
           active: true,
           available: true,
@@ -365,7 +413,10 @@ export async function processIncoming(eventId: string) {
           ...products.slice(0, 8).map((p, i) => ({
             value: String(i + 1),
             title: p.displayName ?? p.name,
-            description: `Estoque: ${p.stock} · Máximo: ${p.maxQuantity}`,
+            description:
+              p.source === 'SMM'
+                ? `Mínimo: ${p.minQuantity} · Máximo: ${p.maxQuantity}`
+                : `Estoque: ${p.stock} · Máximo: ${p.maxQuantity}`,
           })),
           ...(products.length > 8
             ? [{ value: '9', title: 'Mais produtos' }]
@@ -375,6 +426,18 @@ export async function processIncoming(eventId: string) {
         'Ver produtos',
       );
       return text;
+    };
+    const startSmmDetails = (slug: string, quantity: number, type: string) => {
+      state = {
+        step: 'SMM_DETAILS',
+        slug,
+        quantity,
+        provider: state.provider,
+        smmType: type,
+        details: {},
+        fieldIndex: 0,
+      };
+      return `${smmDetailFields(type)[0]!.label}\n0 - Cancelar`;
     };
     try {
       if (
@@ -431,7 +494,10 @@ export async function processIncoming(eventId: string) {
           });
           response = orders.length
             ? orders
-                .map((o) => `${o.id.slice(0, 8)} • ${o.status} • R$ ${o.totalBrl.toFixed(2)}`)
+                .map(
+                  (o) =>
+                    `${o.id.slice(0, 8)} • ${o.source === 'SMM' ? (o.smmState ?? o.status) : o.status} • R$ ${o.totalBrl.toFixed(2)}${o.source === 'SMM' && o.smmRemains !== null ? ` • Restantes: ${o.smmRemains}` : ''}${o.refundedBrl.gt(0) ? ` • Devolvido: R$ ${o.refundedBrl.toFixed(2)}` : ''}`,
+                )
                 .join('\n')
             : 'Você ainda não fez pedidos.';
           response += '\n\n0 - Menu';
@@ -455,33 +521,87 @@ export async function processIncoming(eventId: string) {
           const slug = state.options?.[Number(input) - 1];
           if (!slug) response = 'Escolha um produto da lista.';
           else {
-            const quote = await quoteProduct(slug, 1);
-            state = { step: 'QUANTITY', slug, provider: state.provider };
-            response = `${quote.product.name}\n${(quote.product.description ?? '').replace(/<[^>]*>/g, '')}\nPreço unitário: R$ ${quote.unitSaleBrl}\nDuração: ${quote.live.durationDays ?? 'Não informada'} dias\nGarantia: ${quote.live.warranty?.enabled ? (quote.live.warranty.days ?? 'Consultar suporte') : 0} dias\nMáximo: ${quote.live.stock.maxQuantity}\n\n${await messageTemplate('quantity')}\nVoltar - Produtos\n0 - Cancelar`;
-            choices(
-              'buttons',
-              response,
-              [1, 2, 3]
-                .filter((n) => n <= quote.live.stock.maxQuantity)
-                .map((n) => ({ value: String(n), title: n === 1 ? '1 unidade' : `${n} unidades` })),
+            const listing = await db.product.findUniqueOrThrow({ where: { slug } });
+            const quote = await quoteProduct(
+              slug,
+              listing.source === 'SMM' ? listing.minQuantity : 1,
             );
+            state = { step: 'QUANTITY', slug, provider: state.provider };
+            response =
+              quote.product.source === 'SMM'
+                ? `${quote.product.name}\n${(quote.product.description ?? '').replace(/<[^>]*>/g, '')}\nPreço: R$ ${quote.unitSaleBrl} por ${listing.priceBasis === 1 ? 'pacote' : '1.000 unidades'}\nMínimo: ${listing.minQuantity}\nMáximo: ${quote.live.stock.maxQuantity}\n\nInforme a quantidade desejada.\nVoltar - Produtos\n0 - Cancelar`
+                : `${quote.product.name}\n${(quote.product.description ?? '').replace(/<[^>]*>/g, '')}\nPreço unitário: R$ ${quote.unitSaleBrl}\nDuração: ${quote.live.durationDays ?? 'Não informada'} dias\nGarantia: ${quote.live.warranty?.enabled ? (quote.live.warranty.days ?? 'Consultar suporte') : 0} dias\nMáximo: ${quote.live.stock.maxQuantity}\n\n${await messageTemplate('quantity')}\nVoltar - Produtos\n0 - Cancelar`;
+            if (
+              listing.source === 'SMM' &&
+              ['Package', 'Custom Comments'].includes(listing.smmType!)
+            ) {
+              response =
+                response.replace(/Informe a quantidade desejada\.[\s\S]*$/, '') +
+                startSmmDetails(slug, listing.minQuantity, listing.smmType!);
+            } else {
+              choices(
+                'buttons',
+                response,
+                (listing.source === 'SMM'
+                  ? [listing.minQuantity, listing.minQuantity * 2, listing.minQuantity * 3]
+                  : [1, 2, 3]
+                )
+                  .filter((n) => n <= quote.live.stock.maxQuantity)
+                  .map((n) => ({
+                    value: String(n),
+                    title: n === 1 ? '1 unidade' : `${n} unidades`,
+                  })),
+              );
+            }
           }
         }
       } else if (state.step === 'QUANTITY' && state.slug) {
         const quantity = Number(input);
         const quote = await quoteProduct(state.slug, quantity);
-        state = {
-          ...state,
-          step: 'CONFIRM',
-          quantity,
-          total: quote.totalBrl,
-          quoteExpires: Date.now() + 5 * 60000,
-        };
-        response = `${await messageTemplate('summary', { produto: quote.product.name, valor: quote.totalBrl })}\nQuantidade: ${quantity}\n\n1 - Confirmar usando saldo da carteira\n0 - Cancelar\nO preço será conferido novamente ao confirmar.`;
-        choices('buttons', response, [
-          { value: '1', title: '✅ Confirmar compra' },
-          { value: '0', title: 'Cancelar' },
-        ]);
+        if (quote.product.source === 'SMM') {
+          response = startSmmDetails(state.slug, quantity, quote.product.smmType!);
+        } else {
+          state = {
+            ...state,
+            step: 'CONFIRM',
+            quantity,
+            total: quote.totalBrl,
+            quoteExpires: Date.now() + 5 * 60000,
+          };
+          response = `${await messageTemplate('summary', { produto: quote.product.name, valor: quote.totalBrl })}\nQuantidade: ${quantity}\n\n1 - Confirmar usando saldo da carteira\n0 - Cancelar\nO preço será conferido novamente ao confirmar.`;
+          choices('buttons', response, [
+            { value: '1', title: '✅ Confirmar compra' },
+            { value: '0', title: 'Cancelar' },
+          ]);
+        }
+      } else if (state.step === 'SMM_DETAILS' && state.slug && state.smmType) {
+        const fields = smmDetailFields(state.smmType),
+          index = state.fieldIndex ?? 0,
+          field = fields[index]!;
+        const value = validateSmmField(field.key, raw);
+        state.details = { ...state.details, [field.key]: value };
+        if (index + 1 < fields.length) {
+          state.fieldIndex = index + 1;
+          response = `${fields[index + 1]!.label}\n0 - Cancelar`;
+        } else {
+          const quantity =
+            state.smmType === 'Custom Comments'
+              ? state.details.comments!.split(/\r?\n/).length
+              : state.quantity!;
+          const quote = await quoteProduct(state.slug, quantity);
+          state = {
+            ...state,
+            step: 'CONFIRM',
+            quantity,
+            total: quote.totalBrl,
+            quoteExpires: Date.now() + 5 * 60000,
+          };
+          response = `${await messageTemplate('summary', { produto: quote.product.name, valor: quote.totalBrl })}\nQuantidade: ${quantity}\nDestino: ${state.details!.link}\n${state.details!.username ? `Autor: ${state.details!.username}\n` : ''}${state.details!.answer_number ? `Resposta: ${state.details!.answer_number}\n` : ''}\n1 - Confirmar usando saldo da carteira\n0 - Cancelar\nO preço será conferido novamente ao confirmar.`;
+          choices('buttons', response, [
+            { value: '1', title: '✅ Confirmar compra' },
+            { value: '0', title: 'Cancelar' },
+          ]);
+        }
       } else if (state.step === 'CONFIRM' && state.slug && state.quantity && state.total) {
         if (!['1', 'sim', 'confirmar'].includes(input))
           response = 'Digite 1 para confirmar ou 0 para cancelar.';
@@ -496,6 +616,7 @@ export async function processIncoming(eventId: string) {
             quantity: state.quantity,
             expectedTotalBrl: state.total,
             idempotencyKey: `message-${event.key}`,
+            details: state.details,
           });
           state = { step: 'MENU' };
           response = await messageTemplate('processing', { pedido: order.id.slice(0, 8) });

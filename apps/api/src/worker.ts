@@ -21,6 +21,7 @@ import { withLock } from './core/lock.js';
 import { evolution } from './integrations/evolution.js';
 import { recordEventFailure } from './modules/events.js';
 import { notifyOutgoing } from './core/dispatch.js';
+import { syncAllSmm } from './modules/smm-catalog.js';
 
 async function processEvent(id: string) {
   const event = await db.webhookEvent.findUniqueOrThrow({ where: { id } });
@@ -69,6 +70,13 @@ async function pump() {
     where: {
       status: { in: ['RESERVED', 'PROCESSING', 'UNKNOWN'] },
       updatedAt: { lt: new Date(Date.now() - 15000) },
+      OR: [
+        { source: 'PARTNER' },
+        {
+          source: 'SMM',
+          OR: [{ lastSmmPollAt: null }, { lastSmmPollAt: { lt: new Date(Date.now() - 60000) } }],
+        },
+      ],
     },
     take: 50,
   });
@@ -157,6 +165,7 @@ const workers = [
     async (job) => {
       if (job.name === 'pump') await pump();
       else if (job.name === 'catalog') await syncCatalog();
+      else if (job.name === 'smm-catalog') await syncAllSmm();
       else if (job.name === 'exchange') await refreshExchange();
       else if (job.name === 'payments') await pollPayments();
       else if (job.name === 'retention') {
@@ -203,6 +212,11 @@ await maintenanceQueue.upsertJobScheduler(
   'catalog',
   { every: 120000 },
   { name: 'catalog', data: {} },
+);
+await maintenanceQueue.upsertJobScheduler(
+  'smm-catalog',
+  { every: 120000 },
+  { name: 'smm-catalog', data: {} },
 );
 await maintenanceQueue.upsertJobScheduler(
   'exchange',

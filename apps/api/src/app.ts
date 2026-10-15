@@ -16,7 +16,7 @@ import { syncCatalog, browseCatalog, importCatalog, archiveProduct } from './mod
 import { adjustBalance } from './modules/wallet.js';
 import { refundOrder } from './modules/orders.js';
 import { refreshExchange } from './modules/exchange.js';
-import { controlledResend } from './modules/messaging.js';
+import { controlledResend, prepareDeliveries } from './modules/messaging.js';
 import { validateTemplate } from './modules/conversation.js';
 import {
   evolution,
@@ -31,7 +31,10 @@ import { pixGateway, expayNotificationChargeId } from './integrations/pix.js';
 import { partner } from './integrations/partner.js';
 import { orderQueue } from './core/queues.js';
 import { templates, messageTemplate } from './modules/templates.js';
-import { priceQuote, type Tier } from './modules/pricing.js';
+import { priceQuote, smmPriceQuote, type Tier } from './modules/pricing.js';
+import { registerCatalogAdmin } from './modules/catalog-admin.js';
+import { linkSmmOrder, processSmmOrder } from './modules/smm-orders.js';
+import { withLock } from './core/lock.js';
 import { retryEvent } from './modules/events.js';
 
 const money = z.string().regex(/^\d{1,12}(\.\d{1,2})?$/);
@@ -237,6 +240,7 @@ export async function buildApp() {
   await app.register(
     async (admin) => {
       admin.addHook('preHandler', authenticate);
+      await registerCatalogAdmin(admin);
       admin.get('/auth/me', async (request) => ({
         admin: request.admin,
         csrf: request.cookies.csrf,
@@ -269,15 +273,17 @@ export async function buildApp() {
           db.order.count({
             where: { status: { in: ['RESERVED', 'PROCESSING', 'UNKNOWN', 'REVIEW'] } },
           }),
-          db.order.count({ where: { status: 'COMPLETED' } }),
-          db.order.aggregate({ where: { status: 'COMPLETED' }, _sum: { totalBrl: true } }),
+          db.order.count({ where: { status: { in: ['COMPLETED', 'PARTIAL'] } } }),
+          db.$queryRaw<
+            Array<{ value: Prisma.Decimal }>
+          >`SELECT COALESCE(SUM("totalBrl" - "refundedBrl"),0) AS value FROM "Order" WHERE status IN ('COMPLETED','PARTIAL')`,
           db.order.aggregate({
-            where: { status: { in: ['COMPLETED', 'REFUNDED'] } },
+            where: { status: { in: ['COMPLETED', 'PARTIAL', 'REFUNDED'] } },
             _sum: { grossProfitBrl: true },
           }),
           db.$queryRaw<
             Array<{ value: Prisma.Decimal }>
-          >`SELECT COALESCE(SUM("totalBrl" - "estimatedCostUsd" * "usdBrl"),0) AS value FROM "Order" WHERE status='COMPLETED'`,
+          >`SELECT COALESCE(SUM("totalBrl" - "refundedBrl" - CASE WHEN source='SMM' THEN COALESCE("actualCostBrl","estimatedCostBrl",0) ELSE "estimatedCostUsd" * "usdBrl" END),0) AS value FROM "Order" WHERE status IN ('COMPLETED','PARTIAL')`,
           db.payment.aggregate({ where: { creditedAt: { not: null } }, _sum: { amountBrl: true } }),
           db.whatsappInstance.findMany(),
           partner.balance().catch(() => null),
@@ -285,7 +291,7 @@ export async function buildApp() {
         ]);
         const chart = await db.$queryRaw<
           Array<{ day: string; revenue: Prisma.Decimal; orders: bigint }>
-        >`SELECT to_char(("completedAt" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo','YYYY-MM-DD') AS day, SUM("totalBrl") AS revenue, COUNT(*) AS orders FROM "Order" WHERE status='COMPLETED' AND "completedAt">NOW()-make_interval(days=>${days}::int) GROUP BY day ORDER BY day`;
+        >`SELECT to_char(("completedAt" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo','YYYY-MM-DD') AS day, SUM("totalBrl" - "refundedBrl") AS revenue, COUNT(*) AS orders FROM "Order" WHERE status IN ('COMPLETED','PARTIAL') AND "completedAt">NOW()-make_interval(days=>${days}::int) GROUP BY day ORDER BY day`;
         const review = await db.order.count({ where: { status: 'REVIEW' } });
         const failedEvents = await db.webhookEvent.count({
           where: { failedAt: { not: null }, processedAt: null },
@@ -298,7 +304,7 @@ export async function buildApp() {
           review,
           failedEvents,
           days,
-          revenue: revenue._sum.totalBrl ?? '0',
+          revenue: revenue[0]?.value ?? '0',
           profit: profit._sum.grossProfitBrl ?? '0',
           estimatedProfit: estimated[0]?.value ?? '0',
           deposits: deposits._sum.amountBrl ?? '0',
@@ -331,7 +337,11 @@ export async function buildApp() {
           db.product.findMany({
             where,
             ...pagingOptions(q),
-            include: { provider: true },
+            include: {
+              provider: true,
+              category: true,
+              smmProvider: { select: { id: true, name: true, active: true } },
+            },
             orderBy: { name: 'asc' },
           }),
           db.product.count({ where }),
@@ -345,18 +355,44 @@ export async function buildApp() {
             ...p,
             supplierName: p.name,
             name: p.displayName ?? p.name,
-            quote: rate
-              ? priceQuote(p.costUsd.toString(), p.bulkTiers as Tier[], 1, rate.usdBrl.toString(), {
-                  markupPercent: p.markupPercent.toString(),
-                  fixedMargin: p.fixedMargin.toString(),
-                  manualPrice: p.manualPrice?.toString(),
-                  promoPrice: p.promoPrice?.toString(),
-                  promoUntil: p.promoUntil,
-                  roundingStep: p.roundingStep.toString(),
-                  volumeDiscountPercent: p.volumeDiscountPercent.toString(),
-                  volumeMinQuantity: p.volumeMinQuantity,
-                })
-              : null,
+            quote:
+              p.source === 'SMM'
+                ? p.costCurrency === 'BRL' || rate
+                  ? smmPriceQuote(
+                      p.supplierRate!.toString(),
+                      p.priceBasis,
+                      p.priceBasis,
+                      p.costCurrency === 'BRL' ? '1' : rate!.usdBrl.toString(),
+                      {
+                        markupPercent: p.markupPercent.toString(),
+                        fixedMargin: p.fixedMargin.toString(),
+                        manualPrice: p.manualPrice?.toString(),
+                        promoPrice: p.promoPrice?.toString(),
+                        promoUntil: p.promoUntil,
+                        roundingStep: p.roundingStep.toString(),
+                        volumeDiscountPercent: '0',
+                        volumeMinQuantity: p.volumeMinQuantity,
+                      },
+                    )
+                  : null
+                : rate
+                  ? priceQuote(
+                      p.costUsd.toString(),
+                      p.bulkTiers as Tier[],
+                      1,
+                      rate.usdBrl.toString(),
+                      {
+                        markupPercent: p.markupPercent.toString(),
+                        fixedMargin: p.fixedMargin.toString(),
+                        manualPrice: p.manualPrice?.toString(),
+                        promoPrice: p.promoPrice?.toString(),
+                        promoUntil: p.promoUntil,
+                        roundingStep: p.roundingStep.toString(),
+                        volumeDiscountPercent: p.volumeDiscountPercent.toString(),
+                        volumeMinQuantity: p.volumeMinQuantity,
+                      },
+                    )
+                  : null,
           })),
           total,
           page: q.page,
@@ -398,6 +434,7 @@ export async function buildApp() {
             visible: z.boolean().optional(),
             displayName: z.string().trim().min(1).max(150).nullable().optional(),
             description: z.string().trim().max(2500).nullable().optional(),
+            categoryId: z.string().min(1).nullable().optional(),
             authorizedResale: z.boolean().optional(),
             markupPercent: money.refine((v) => new Prisma.Decimal(v).lte(1000)).optional(),
             fixedMargin: money.optional(),
@@ -528,6 +565,8 @@ export async function buildApp() {
                 'FAILED',
                 'REVIEW',
                 'REFUNDED',
+                'PARTIAL',
+                'CANCELLED',
               ])
               .optional(),
           })
@@ -545,11 +584,15 @@ export async function buildApp() {
           }),
           db.order.count({ where }),
         ]);
-        return { data, total, page: q.page };
+        return {
+          data: data.map(({ encryptedSmmRequest: _secret, ...row }) => row),
+          total,
+          page: q.page,
+        };
       });
       admin.get('/orders/:id', async (request) => {
         const { id } = idSchema.parse(request.params);
-        return db.order.findUniqueOrThrow({
+        const order = await db.order.findUniqueOrThrow({
           where: { id },
           include: {
             customer: true,
@@ -568,6 +611,13 @@ export async function buildApp() {
             },
           },
         });
+        const { encryptedSmmRequest, ...publicOrder } = order;
+        return {
+          ...publicOrder,
+          ...(encryptedSmmRequest
+            ? { targetLink: (JSON.parse(decrypt(encryptedSmmRequest)) as { link?: string }).link }
+            : {}),
+        };
       });
       admin.post('/orders/:id/reconcile', async (request) => {
         requirePermission(request, 'operate');
@@ -587,6 +637,27 @@ export async function buildApp() {
           data: { status: 'REVIEW' },
         });
         await audit(request.admin.id, 'order.review', id);
+        return { ok: true };
+      });
+      admin.post('/orders/:id/smm/link', async (request) => {
+        requirePermission(request, 'finance');
+        const { id } = idSchema.parse(request.params);
+        const { externalId } = z
+          .object({ externalId: z.string().regex(/^\d{1,30}$/), confirmed: z.literal(true) })
+          .parse(request.body);
+        const result = await withLock(`order:${id}`, () =>
+          linkSmmOrder(id, externalId, request.admin.id),
+        );
+        await prepareDeliveries();
+        await notifyOutgoing();
+        return result;
+      });
+      admin.post('/orders/:id/smm/status', async (request) => {
+        requirePermission(request, 'operate');
+        const { id } = idSchema.parse(request.params);
+        await withLock(`order:${id}`, () => processSmmOrder(id, true));
+        await prepareDeliveries();
+        await notifyOutgoing();
         return { ok: true };
       });
       admin.post('/orders/:id/refund', async (request) => {

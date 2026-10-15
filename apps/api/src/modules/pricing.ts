@@ -53,3 +53,31 @@ export function priceQuote(
     estimatedProfitBrl: sale.sub(converted).mul(quantity).toFixed(2),
   };
 }
+export function smmPriceQuote(
+  nativeRate: string,
+  quantity: number,
+  basis: number,
+  nativeBrl: string,
+  rule: PriceRule,
+) {
+  if (!Number.isInteger(quantity) || quantity < 1 || ![1, 1000].includes(basis))
+    throw new AppError('INVALID_QUANTITY', 'Quantidade ou unidade de preço SMM inválida.');
+  const base = priceQuote(nativeRate, [], 1, nativeBrl, {
+    ...rule,
+    volumeMinQuantity: 1,
+    volumeDiscountPercent: quantity >= rule.volumeMinQuantity ? rule.volumeDiscountPercent : '0',
+  });
+  const total = new Decimal(base.unitSaleBrl)
+    .mul(quantity)
+    .div(basis)
+    .toDecimalPlaces(2, Decimal.ROUND_CEIL);
+  const nativeCost = new Decimal(nativeRate).mul(quantity).div(basis);
+  const costBrl = nativeCost.mul(nativeBrl);
+  return {
+    unitSaleBrl: base.unitSaleBrl,
+    totalBrl: total.toFixed(2),
+    nativeCost: nativeCost.toFixed(8),
+    estimatedCostBrl: costBrl.toDecimalPlaces(4, Decimal.ROUND_CEIL).toFixed(4),
+    estimatedProfitBrl: total.sub(costBrl).toFixed(2),
+  };
+}

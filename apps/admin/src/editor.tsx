@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Package, Wallet, Tags, Eye, X, Shield, type LucideIcon } from 'lucide-react';
 import type { Row } from './api';
+import { api } from './api';
 
 export function EditorDialog({
   title,
@@ -149,6 +150,25 @@ function ProductField({
   );
 }
 export function ProductFields({ row }: { row: Row }) {
+  const [categories, setCategories] = useState<Row[]>([]);
+  const [categoryError, setCategoryError] = useState('');
+  useEffect(() => {
+    let active = true;
+    void api<{ data: Row[] }>('/categories')
+      .then((r) => {
+        if (active) setCategories(r.data);
+      })
+      .catch(() => {
+        if (active)
+          setCategoryError(
+            'Não foi possível carregar as categorias. A categoria atual será mantida.',
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const priceUnit = row.source === 'SMM' && row.priceBasis === 1000 ? ' por 1.000' : '';
   const [selected, select] = useState(0);
   const id = useId();
   const nav = useRef<HTMLDivElement>(null);
@@ -228,6 +248,24 @@ export function ProductFields({ row }: { row: Row }) {
           </p>
           <div className="stack">
             <label className="field">
+              <span>Categoria no WhatsApp</span>
+              <select name="categoryId" defaultValue={row.categoryId ?? ''}>
+                <option value="">
+                  {row.source === 'SMM' ? 'Sem categoria' : 'Categoria original do fornecedor'}
+                </option>
+                {row.categoryId && !categories.some((c) => c.id === row.categoryId) && (
+                  <option value={row.categoryId}>{row.category?.name ?? 'Categoria atual'}</option>
+                )}
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {c.active === false ? ' (oculta)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {categoryError && <p role="alert">{categoryError}</p>}
+            <label className="field">
               <span id={`${id}-name-label`}>Nome na loja</span>
               <input
                 name="displayName"
@@ -277,11 +315,15 @@ export function ProductFields({ row }: { row: Row }) {
             />
             <ProductField
               name="fixedMargin"
-              label="Margem fixa por unidade (R$)"
+              label={priceUnit ? 'Margem fixa por 1.000 (R$)' : 'Margem fixa por unidade (R$)'}
               value={row.fixedMargin}
               required
             />
-            <ProductField name="manualPrice" label="Preço manual (R$)" value={row.manualPrice} />
+            <ProductField
+              name="manualPrice"
+              label={`Preço manual${priceUnit} (R$)`}
+              value={row.manualPrice}
+            />
             <ProductField
               name="roundingStep"
               label="Passo de arredondamento (R$)"
@@ -292,6 +334,8 @@ export function ProductFields({ row }: { row: Row }) {
           <div className="editor-tip">
             <Wallet size={18} />
             <p>
+              {priceUnit &&
+                'Neste serviço, os preços e a margem fixa são por 1.000 unidades. O total é proporcional à quantidade escolhida. '}
               Deixe o preço manual vazio para calcular a venda usando custo, cotação e margens
               configuradas.
             </p>
@@ -309,7 +353,11 @@ export function ProductFields({ row }: { row: Row }) {
             Configure ofertas por prazo e descontos para compras em quantidade.
           </p>
           <div className="form-grid">
-            <ProductField name="promoPrice" label="Preço promocional (R$)" value={row.promoPrice} />
+            <ProductField
+              name="promoPrice"
+              label={`Preço promocional${priceUnit} (R$)`}
+              value={row.promoPrice}
+            />
             <ProductField
               name="promoUntil"
               type="datetime-local"

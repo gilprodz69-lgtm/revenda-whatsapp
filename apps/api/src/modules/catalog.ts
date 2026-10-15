@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import type { PartnerProduct } from '../integrations/partner-contract.js';
 import { AppError, PartnerError } from '../core/errors.js';
+import { ensurePartnerCategory } from './smm-catalog.js';
 
 async function upstreamCatalog() {
   try {
@@ -35,9 +36,12 @@ export async function browseCatalog(query: {
 }) {
   const products = await upstreamCatalog();
   const imported = new Set(
-    (await db.product.findMany({ where: { archivedAt: null }, select: { slug: true } })).map(
-      (p) => p.slug,
-    ),
+    (
+      await db.product.findMany({
+        where: { source: 'PARTNER', archivedAt: null },
+        select: { slug: true },
+      })
+    ).map((p) => p.slug),
   );
   const search = query.search.toLocaleLowerCase('pt-BR');
   const filtered = products
@@ -119,6 +123,7 @@ async function storeProducts(tx: Prisma.TransactionClient, products: PartnerProd
       },
     });
   for (const p of products) {
+    const category = await ensurePartnerCategory(tx, p.provider);
     const data = {
       externalId: p.id,
       code: p.productCode,
@@ -137,7 +142,7 @@ async function storeProducts(tx: Prisma.TransactionClient, products: PartnerProd
     };
     await tx.product.upsert({
       where: { slug: p.slug },
-      create: { slug: p.slug, ...data },
+      create: { slug: p.slug, categoryId: category.id, ...data },
       update: data,
     });
   }
@@ -210,9 +215,12 @@ export async function syncCatalog() {
   return catalogWrite(async () => {
     const products = await upstreamCatalog();
     const imported = new Set(
-      (await db.product.findMany({ where: { archivedAt: null }, select: { slug: true } })).map(
-        (p) => p.slug,
-      ),
+      (
+        await db.product.findMany({
+          where: { source: 'PARTNER', archivedAt: null },
+          select: { slug: true },
+        })
+      ).map((p) => p.slug),
     );
     const selected = products.filter((p) => imported.has(p.slug) && p.currency === 'USD');
     const now = new Date();
@@ -222,6 +230,7 @@ export async function syncCatalog() {
       await tx.product.updateMany({
         where: {
           archivedAt: null,
+          source: 'PARTNER',
           slug: { notIn: products.filter((p) => p.currency === 'USD').map((p) => p.slug) },
         },
         data: { available: false, stock: 0, syncedAt: now },
