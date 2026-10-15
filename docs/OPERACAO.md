@@ -6,7 +6,7 @@ Em **Produtos → Importar serviços**, consulte o catálogo da Partner, pesquis
 
 Após importar, abra **Editar** para definir preço/margem e, em **Disponibilidade**, conferir e autorizar a revenda. Os novos produtos aguardam essa autorização antes de aparecerem no bot. **Sincronizar importados** atualiza custo/estoque dos serviços já cadastrados; a atualização automática também respeita a escolha e não adiciona outros serviços do fornecedor.
 
-Se a consulta falhar, o erro fica na janela com a opção **Tentar novamente**. Confira a chave Partner em Configurações. Erros de autenticação do fornecedor não desconectam sua sessão administrativa. A imagem de erro genérico, sozinha, não identifica a causa na VPS; o novo fluxo diferencia integração ausente, recusa da Partner, formato incompatível e falha ao gravar o catálogo.
+Se a consulta falhar, o erro fica na janela com a opção **Tentar novamente**. Confira a chave Partner em Configurações. Erros de autenticação do fornecedor não desconectam sua sessão administrativa. As mensagens diferenciam integração ausente, recusa da Partner, formato incompatível e falha ao gravar o catálogo.
 
 ## Serviços
 

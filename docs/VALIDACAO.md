@@ -1,5 +1,15 @@
 # Registro de validação
 
+## Versão 1.0.4
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38659057689), commit de código `faa03d8`, passou em 14/10/2026 (horário de Brasília): **81 testes unitários, 45 de integração e 22 de interface, 148 no total**, TypeScript, builds, smoke API/worker, auditoria npm, scripts, updater e inicialização Docker. O teste de migração da Evolution 2.3.7 para 2.4.0-rc2 confirmou a preservação dos registros de teste no banco/volume e a indicação de ativação pendente.
+
+O fluxo Expay foi verificado no PostgreSQL: valor informado → cobrança sem e-mail/documento inventados → resumo, QR e código em mensagens separadas, com o código sem menu ou legenda. Testes nos modos interativo/texto confirmaram ordem de gravação, envio de texto puro e processamento repetido sem nova cobrança/mensagem. Sessões antigas em coleta de e-mail/CPF continuam; a exigência do adaptador Mercado Pago foi preservada. O contrato oficial Expay de `POST /charges` foi consultado novamente: `customer`, `customer.email` e `customer.document` são opcionais.
+
+A importação seletiva foi validada com prévia sem gravação, busca/código/fornecedor, seleção deduplicada, rejeição de itens ausentes sem importação parcial, auditoria transacional e preservação das regras existentes. A sincronização periódica atualiza somente serviços já cadastrados. As rotas exigem sessão/permissão e CSRF na gravação; recusas de autenticação da Partner retornam erro da integração sem encerrar a sessão admin. A interface foi testada em desktop/celular com seleção entre páginas/filtros, revisão e recuperação após erro; capturas locais foram inspecionadas. Formatação local aprovada.
+
+As APIs externas são simuladas nos testes. Nenhuma VPS, credencial real, conta WhatsApp ou cobrança real foi acessada. O erro específico da captura do operador não foi reproduzido com a conta real; a nova janela apresenta mensagens próprias para as falhas de integração.
+
 ## Versão 1.0.3
 
 A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38655654871), commit de código `b3660c2`, passou em 14/10/2026: 78 testes unitários, 36 de integração e 18 de interface (132 no total), TypeScript, build, smoke API/worker, auditoria npm, updater, imagens e inicialização Docker. O menu principal e a carteira usam listas nativas; o fluxo de compra recebeu seleções `listResponseMessage`, rejeitou menus antigos e confirmou um pedido uma única vez. O smoke verificou duas chamadas `sendList` sem depender da varredura periódica.
