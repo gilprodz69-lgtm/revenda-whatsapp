@@ -1,5 +1,13 @@
 # Registro de validação
 
+## Versão 1.0.6
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38662721175), commit de código `d12ea88`, foi aprovada: **94 testes unitários, 51 de integração e 28 de interface, 173 no total**, TypeScript, builds, smoke API/worker, auditoria npm, scripts, updater e inicialização Docker. O teste de migração da Evolution confirmou a preservação dos registros de teste no banco/volume entre 2.3.7 e 2.4.0-rc2.
+
+O diagnóstico enviado pelo operador mostrou modo BCB salvo sem nenhum registro de cotação. A consulta pública real ao BCB reproduziu HTTP 400 com espaços `+` no filtro OData e retornou HTTP 200 com fechamento ao usar `%20`. Os testes verificaram a codificação, valor/data/validade gravados, consulta explícita em modo manual e rejeição de respostas HTTP inválidas, JSON inválido, data inválida e taxa vencida. PostgreSQL/API confirmaram obtenção da taxa ao salvar BCB, cálculo do produto com a nova taxa e erro explícito quando a preferência é salva mas a consulta falha. O painel distingue preferência de renovação e existência de taxa válida, conserva o estado após recarregar e permite repetir a consulta após erro.
+
+Os registros do operador também mostraram três respostas 502 no detalhe de produto, seguidas de 200. Os testes de transporte verificaram classificação de 502 não JSON, três tentativas máximas em GET, logs sem corpo e POST de compra sem repetição automática, mantendo resultado incerto para reconciliação. As integrações privadas dos testes são simuladas; a consulta real de BCB foi pública e somente leitura. Nenhuma VPS, chave real Partner ou compra/pagamento real foi acessado pelo assistente. Formatação local aprovada.
+
 ## Versão 1.0.5
 
 A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38660878396), commit de código `4e3e540`, passou em 14/10/2026 (Brasília): **83 testes unitários, 49 de integração e 24 de interface, 156 no total**, TypeScript, builds, smoke API/worker, auditoria npm, scripts, updater, imagens e inicialização Docker. O smoke da Evolution confirmou novamente os registros de teste preservados na migração 2.3.7 → 2.4.0-rc2.
