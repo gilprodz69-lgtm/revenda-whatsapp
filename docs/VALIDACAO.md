@@ -1,5 +1,17 @@
 # Registro de validação
 
+## Versão 1.0.7
+
+A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38730240498), commit de código `6c58913`, foi aprovada: **94 testes unitários, 58 de integração e 34 de interface, 186 no total**, TypeScript, builds, smoke API/worker, auditoria npm sem vulnerabilidades reportadas, scripts, updater e inicialização Docker. As cinco migrations foram aplicadas no banco isolado. A verificação da Evolution preservou os registros de teste de banco/sessão entre 2.3.7 e 2.4.0-rc2.
+
+Os cenários novos verificam edição autenticada de nome/descrição, limites de tamanho, CSRF e bloqueio de operador, busca pelo nome personalizado, persistência após sincronização e retorno ao nome externo ao limpar o campo. O bot usa a apresentação local nos detalhes/resumo e no registro de novos pedidos, sem publicar automaticamente a descrição externa. A exclusão é idempotente e auditada, retira o produto das listagens/novas compras, conserva pedidos/entregas já existentes e não é revertida por sincronização. A reimportação explícita conserva textos/preço e exige nova autorização de revenda.
+
+O fluxo de saldo insuficiente foi testado em modo interativo e texto: nenhuma compra ou débito é criado; o atalho abre o fluxo Pix, produz uma cobrança simulada e não credita saldo pendente. Menus antigos são rejeitados. O menu padrão envia três botões visíveis, mantendo acesso à carteira e listas de categorias, e o painel também permite escolher a lista inicial completa. O smoke de API/worker reais confirmou duas respostas interativas sem duplicação, usando serviços externos HTTP simulados.
+
+No painel desktop/celular, os testes verificam conservação e recarga de nome/descrição, limpeza dos campos, cancelamento/confirmação da exclusão, falha recuperável e persistência da preferência do menu. As capturas dos novos modais foram inspecionadas localmente. Uma reprodução local com Fastify confirmou a rejeição de DELETE sem corpo com cabeçalho JSON vazio; o cliente agora omite esse cabeçalho quando não envia corpo, e o teste da interface confere a requisição de exclusão.
+
+O operador confirmou que o novo teste de venda na 1.0.6 passou; API e worker usavam a mesma cotação válida no mesmo banco. Não foi aplicada outra alteração no cálculo de cotação nesta versão. A migração 202610150005 adiciona apenas colunas opcionais de apresentação/exclusão e um índice. Os testes externos usam mocks; nenhuma VPS, chave real ou compra/pagamento real foi acessado pelo assistente. A renderização dos novos menus deve ser conferida no WhatsApp após atualizar; a aplicação não controla a rolagem nem a abertura automática das listas no aparelho.
+
 ## Versão 1.0.6
 
 A [execução no Ubuntu 24.04](https://github.com/gilprodz69-lgtm/revenda-whatsapp/actions/runs/38662721175), commit de código `d12ea88`, foi aprovada: **94 testes unitários, 51 de integração e 28 de interface, 173 no total**, TypeScript, builds, smoke API/worker, auditoria npm, scripts, updater e inicialização Docker. O teste de migração da Evolution confirmou a preservação dos registros de teste no banco/volume entre 2.3.7 e 2.4.0-rc2.
