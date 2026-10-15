@@ -24,6 +24,8 @@ Excluir um produto preenche `archivedAt` e desativa a listagem, sem remover os r
 
 O modo `bot.messageStyle=interactive` usa `bot.mainMenuStyle=buttons` por padrão: três ações visíveis no menu inicial e listas para categorias/produtos/carteira. `bot.mainMenuStyle=list` mantém as seis ações na lista inicial. `text` mantém a navegação por números. O aplicativo do WhatsApp controla a rolagem e a abertura de listas.
 
+Depois de gerar um Pix, a conversa entra em `IDLE` e exige uma das palavras de `bot.activationKeywords` para voltar ao atendimento. A conciliação financeira funciona independentemente desse estado. Durante etapas ativas, o bot aceita botões e entradas da etapa, ignorando conversas comuns sem renovar a sessão. Saudações não configuradas não são tratadas como comandos implícitos de reinício.
+
 ## Pix
 
 O gateway escolhido para esta operação é **Expay Brasil**. Use a chave da API atual documentada em [expaybrasil.com/docs](https://expaybrasil.com/docs): `X-API-Key`, base `https://expaybrasil.com/api/v1`, criação `POST /charges` com `Idempotency-Key` e consulta `GET /charges/{UUID}`. O contrato consultado está em [references/expay-openapi.json](references/expay-openapi.json), obtido em 14/10/2026. A documentação antiga em Readme.io usa outro contrato (`merchant_key`/purchase/link) e não é usada por este adaptador.

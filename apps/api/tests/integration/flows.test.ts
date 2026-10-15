@@ -1147,6 +1147,78 @@ describe('Produtos da loja e acesso rápido ao Pix', () => {
     await processIncoming(event.id);
     return db.message.findUnique({ where: { key: `reply-${event.key}` } });
   }
+  it('ignora conversa comum no menu antigo sem renovar a sessão nem invalidar botões', async () => {
+    const expiresAt = new Date(Date.now() + 60000);
+    await db.conversation.create({
+      data: {
+        customerId,
+        instanceName: 'store',
+        expiresAt,
+        state: { step: 'MENU', interaction: { token: 'legacy-menu', values: ['0', '3', '5'] } },
+      },
+    });
+    for (const text of ['Top, já usei um bot parecido', 'paguei', 'vou ver depois'])
+      expect(await receive(text)).toBeNull();
+    const conversation = await db.conversation.findFirstOrThrow();
+    expect(conversation.expiresAt).toEqual(expiresAt);
+    expect(conversation.state).toMatchObject({ interaction: { token: 'legacy-menu' } });
+    expect(await db.message.count()).toBe(0);
+    expect(await db.webhookEvent.count({ where: { processedAt: null } })).toBe(0);
+    expect(decrypt((await receive('wa:legacy-menu:3'))!.encryptedText)).toContain(
+      'Quanto deseja adicionar',
+    );
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({
+      step: 'DEPOSIT_AMOUNT',
+    });
+  });
+  it.each([
+    'PROVIDERS',
+    'PRODUCTS',
+    'QUANTITY',
+    'CONFIRM',
+    'DEPOSIT_AMOUNT',
+    'DEPOSIT_EMAIL',
+    'DEPOSIT_CPF',
+  ])('ignora texto alheio à etapa %s e aceita a palavra-chave configurada', async (step) => {
+    await saveSetting('bot.activationKeywords', ['comprar agora']);
+    const expiresAt = new Date(Date.now() + 60000);
+    await db.conversation.create({
+      data: {
+        customerId,
+        instanceName: 'store',
+        expiresAt,
+        state: {
+          step,
+          provider: 'gemini',
+          options: ['product'],
+          slug: 'product',
+          quantity: 1,
+          total: '10',
+          amount: '10',
+          depositKey: 'pending-test',
+        },
+      },
+    });
+    expect(await receive('Top, já usei um bot parecido')).toBeNull();
+    expect(await db.message.count()).toBe(0);
+    expect((await db.conversation.findFirstOrThrow()).expiresAt).toEqual(expiresAt);
+    expect(await db.payment.count()).toBe(0);
+    expect(await db.order.count()).toBe(0);
+    expect(await db.webhookEvent.count({ where: { processedAt: null } })).toBe(0);
+    expect(await receive('COMPRAR   AGORA!')).not.toBeNull();
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+  });
+  it('não usa saudações antigas fora da configuração mesmo com o menu ativo', async () => {
+    await saveSetting('bot.activationKeywords', ['vendas']);
+    expect(await receive('vendas')).not.toBeNull();
+    const conversation = await db.conversation.findFirstOrThrow();
+    for (const text of ['oi', 'olá', 'início', 'menu', 'obrigado'])
+      expect(await receive(text)).toBeNull();
+    expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(1);
+    expect((await db.conversation.findFirstOrThrow()).expiresAt).toEqual(conversation.expiresAt);
+    expect(await receive('1')).not.toBeNull();
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'PROVIDERS' });
+  });
   it('envia menu com três botões visíveis e mantém acesso à carteira e listas de categorias', async () => {
     const options = (message: NonNullable<Awaited<ReturnType<typeof receive>>>) =>
       JSON.parse(decrypt(message.encryptedInteractive!));
@@ -1481,6 +1553,80 @@ describe('Expay Brasil', () => {
     return fetch;
   }
   it.each(['interactive', 'text'])(
+    'após gerar Pix em modo %s só reabre por palavra configurada e continua conciliando o pagamento',
+    async (style) => {
+      await configured();
+      await saveSetting('bot.activationKeywords', ['Abrir loja']);
+      await saveSetting('bot.messageStyle', style);
+      const fetch = mockPixCharge();
+      await receivePix('ABRIR LOJA!');
+      await receivePix('3');
+      const beforePix = (await db.conversation.findFirstOrThrow()).state as {
+        interaction?: { token: string; values: string[] };
+      };
+      await receivePix('10');
+      const payment = await db.payment.findFirstOrThrow();
+      const conversation = await db.conversation.findFirstOrThrow();
+      expect(conversation.state).toEqual({ step: 'IDLE' });
+      expect(payment.status).toBe('PENDING');
+      const replies = await db.message.count({ where: { direction: 'OUT' } });
+      const texts = [
+        'Top, já usei um bot bem parecido quando rodava no x1',
+        'paguei',
+        'vou pagar depois',
+        'oi',
+        'menu',
+        'suporte',
+        'pix',
+        '1',
+        '3',
+        '0',
+        'voltar',
+        'cancelar',
+      ];
+      if (beforePix.interaction)
+        texts.push(`wa:${beforePix.interaction.token}:${beforePix.interaction.values[0]}`);
+      for (const text of texts) {
+        const event = await receivePix(text);
+        await processIncoming(event.id);
+        expect(await db.message.findUnique({ where: { key: `reply-${event.key}` } })).toBeNull();
+      }
+      expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(replies);
+      expect((await db.conversation.findFirstOrThrow()).expiresAt).toEqual(conversation.expiresAt);
+      expect(await db.webhookEvent.count({ where: { processedAt: null } })).toBe(0);
+      expect(await db.payment.count()).toBe(1);
+      expect(await db.order.count()).toBe(0);
+      expect(await db.ledgerEntry.count()).toBe(0);
+      expect(fetch).toHaveBeenCalledTimes(2); // One creation and one authenticated lookup.
+      fetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            charge_id: payment.gatewayId,
+            reference: payment.id,
+            amount: 10,
+            currency: 'BRL',
+            payment_method: 'pix',
+            status: 'paid',
+          }),
+          { status: 200 },
+        ),
+      );
+      await reconcilePayment(payment.gatewayId!);
+      expect(
+        (await db.wallet.findUniqueOrThrow({ where: { customerId } })).available.toFixed(2),
+      ).toBe('10.00');
+      expect((await db.conversation.findFirstOrThrow()).state).toEqual({ step: 'IDLE' });
+      const afterPaid = await db.message.count({ where: { direction: 'OUT' } });
+      await receivePix('obrigado');
+      expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(afterPaid);
+      await receivePix('  ABRIR   LOJA!! ');
+      expect(await db.message.count({ where: { direction: 'OUT' } })).toBe(afterPaid + 1);
+      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+      await receivePix('1');
+      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'PROVIDERS' });
+    },
+  );
+  it.each(['interactive', 'text'])(
     'gera após o valor e envia copia e cola sozinho em modo %s',
     async (style) => {
       await configured();
@@ -1515,7 +1661,7 @@ describe('Expay Brasil', () => {
       expect(decrypt(code.encryptedText)).toBe('000201-PIX-TEST-ONLY');
       expect(code.encryptedInteractive).toBeNull();
       expect(code.encryptedMedia).toBeNull();
-      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'IDLE' });
       const send = vi
         .spyOn(evolution, 'sendText')
         .mockResolvedValue({ key: { id: 'pix-code-sent' } });
@@ -1543,7 +1689,7 @@ describe('Expay Brasil', () => {
       expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body)).customer).toEqual({
         name: 'Cliente',
       });
-      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'MENU' });
+      expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'IDLE' });
     },
   );
   it('mantém coleta e validação reais quando o gateway é Mercado Pago', async () => {

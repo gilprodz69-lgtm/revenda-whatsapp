@@ -1163,7 +1163,9 @@ function App() {
                             Separe palavras ou frases por vírgula. O bot inicia somente no privado
                             quando a mensagem corresponde a uma delas, ignorando maiúsculas e
                             acentos. Depois de iniciado, o cliente pode navegar pelas opções. Deixar
-                            vazio impede iniciar novas conversas.
+                            vazio impede iniciar novas conversas. Mensagens fora das opções são
+                            ignoradas. Após gerar um Pix, somente as palavras-chave reabrem o
+                            atendimento.
                           </small>
                           <Field name="welcome" label="Mensagem de boas-vindas">
                             <textarea

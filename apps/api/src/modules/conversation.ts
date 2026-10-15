@@ -31,6 +31,7 @@ export function normalizedInput(value: string) {
 }
 export const stateSchema = z.object({
   step: z.enum([
+    'IDLE',
     'MENU',
     'PROVIDERS',
     'PRODUCTS',
@@ -54,6 +55,44 @@ export const stateSchema = z.object({
   quoteExpires: z.number().optional(),
 });
 type State = z.infer<typeof stateSchema>;
+function acceptsStepInput(state: State, input: string) {
+  if (state.step === 'IDLE') return false;
+  if (['0', 'cancelar', 'voltar', 'suporte', 'atendente', 'humano'].includes(input)) return true;
+  switch (state.step) {
+    case 'MENU':
+      return [
+        '1',
+        'produtos',
+        'catalogo',
+        '2',
+        'saldo',
+        'extrato',
+        '3',
+        'pix',
+        'deposito',
+        'adicionar saldo',
+        '4',
+        'pedidos',
+        'meus pedidos',
+        '5',
+        '6',
+        'conta',
+        'minha conta',
+      ].includes(input);
+    case 'PROVIDERS':
+    case 'PRODUCTS':
+    case 'QUANTITY':
+      return /^\d+$/.test(input);
+    case 'CONFIRM':
+      return ['1', 'sim', 'confirmar'].includes(input);
+    case 'DEPOSIT_AMOUNT':
+      return /^\d+(?:[.,]\d+)?$/.test(input);
+    case 'DEPOSIT_EMAIL':
+      return input.includes('@') || input === 'continuar';
+    case 'DEPOSIT_CPF':
+      return /^[\d.\-\s]+$/.test(input) || input === 'continuar';
+  }
+}
 export function validCpf(cpf: string) {
   if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return false;
   for (let n = 9; n <= 10; n++) {
@@ -96,12 +135,11 @@ export async function processIncoming(eventId: string) {
           },
         })
       : null;
-    const active = !!current && current.expiresAt > new Date();
+    const stateBefore =
+      current && current.expiresAt > new Date() ? stateSchema.parse(current.state) : null;
+    const active = !!stateBefore && stateBefore.step !== 'IDLE';
     if (raw.startsWith('wa:')) {
-      const selected = resolveChoice(
-        raw,
-        active ? (current.state as Record<string, unknown>).interaction : null,
-      );
+      const selected = resolveChoice(raw, active ? stateBefore.interaction : null);
       // Old menus never become quantities or confirmations in a different conversation step.
       if (selected === null) {
         await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
@@ -110,11 +148,9 @@ export async function processIncoming(eventId: string) {
       raw = selected;
     }
     const trigger = matchesActivation(raw, await activationKeywords());
-    if (
-      !active &&
-      !trigger &&
-      !(existingCustomer?.humanUntil && existingCustomer.humanUntil > new Date())
-    ) {
+    const input = normalizedInput(raw);
+    const humanActive = !!existingCustomer?.humanUntil && existingCustomer.humanUntil > new Date();
+    if (!trigger && !humanActive && (!active || !acceptsStepInput(stateBefore!, input))) {
       await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
       return;
     }
@@ -128,10 +164,7 @@ export async function processIncoming(eventId: string) {
       },
       update: {},
     });
-    let state: State =
-      current && current.expiresAt > new Date()
-        ? stateSchema.parse(current.state)
-        : { step: 'MENU' };
+    let state: State = stateBefore ?? { step: 'MENU' };
     let response = '';
     let qr: string | undefined;
     let pixCode: string | undefined;
@@ -172,8 +205,7 @@ export async function processIncoming(eventId: string) {
             },
       );
     };
-    const input = normalizedInput(raw),
-      store = await setting('store.name', 'Nossa loja');
+    const store = await setting('store.name', 'Nossa loja');
     const finishDeposit = async (payer: PixPayer = {}) => {
       if (!state.amount) throw new AppError('INVALID_AMOUNT', 'Informe novamente o valor do Pix.');
       const payment = await createDeposit(
@@ -187,7 +219,9 @@ export async function processIncoming(eventId: string) {
       response = `${await messageTemplate('awaitingPayment', { valor: payment.amountBrl.toFixed(2) })}\nVencimento: ${payment.expiresAt?.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) ?? 'consulte o prazo no aplicativo do banco'}\n\n${code ? 'O código Pix copia e cola será enviado em uma mensagem separada. Toque e segure a mensagem com o código e selecione Copiar para colar no aplicativo do seu banco.' : 'Cobrança em processamento. Aguarde ou solicite suporte.'}`;
       pixCode = code;
       qr = payment.encryptedQrImage ? decrypt(payment.encryptedQrImage) : undefined;
-      state = { step: 'MENU' };
+      // A pending Pix is not an invitation to keep replying to unrelated messages.
+      // Only a configured activation keyword may start a new conversation from here.
+      state = { step: 'IDLE' };
     };
     const mainMenu = async () => {
       const text = await messageTemplate('welcome', { nome: customer.name, loja: store });
@@ -332,11 +366,7 @@ export async function processIncoming(eventId: string) {
       )
         response = '';
       else if (['suporte', 'atendente', 'humano'].includes(input)) response = await startHuman();
-      else if (
-        (!active && trigger) ||
-        (state.step === 'MENU' && trigger) ||
-        ['menu', 'oi', 'ola', 'inicio', '0', 'cancelar'].includes(input)
-      ) {
+      else if (trigger || ['0', 'cancelar'].includes(input)) {
         state = { step: 'MENU' };
         response = await mainMenu();
       } else if (input === 'voltar') {
@@ -390,7 +420,7 @@ export async function processIncoming(eventId: string) {
           response = await startHuman();
         } else if (['6', 'conta', 'minha conta'].includes(input))
           response = `Nome: ${customer.name}\nWhatsApp: +${customer.phone}\nConta: ${customer.id.slice(0, 8)}\n\n0 - Menu`;
-        else response = await mainMenu();
+        else response = '';
       } else if (state.step === 'PROVIDERS') {
         if (input === '9') response = await showProviders((state.providerOffset ?? 0) + 8);
         else {
