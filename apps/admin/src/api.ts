@@ -16,7 +16,10 @@ export async function api<T = Row>(path: string, method = 'GET', body?: unknown)
   const response = await fetch(`/api${path}`, {
     method,
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': decodeURIComponent(csrf) },
+    headers: {
+      'x-csrf-token': decodeURIComponent(csrf),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json().catch(() => ({ message: 'Servidor indisponível.' }));

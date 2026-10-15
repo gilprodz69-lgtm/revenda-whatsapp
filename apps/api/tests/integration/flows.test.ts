@@ -1375,13 +1375,20 @@ describe('Produtos da loja e acesso rápido ao Pix', () => {
       await saveSetting('bot.messageStyle', style);
       await saveSetting('pix.gateway', 'expay');
       await saveSetting('secret.expayApiKey', 'TEST-NOT-REAL', true);
+      const gatewayId = randomUUID();
+      let reference = '',
+        amount = 0;
       const fetch = vi.fn(async (_url: unknown, options?: RequestInit) => {
-        const body = JSON.parse(String(options?.body));
+        if (options?.method === 'POST') {
+          const body = JSON.parse(String(options.body));
+          reference = body.reference;
+          amount = body.amount;
+        }
         return new Response(
           JSON.stringify({
-            charge_id: randomUUID(),
-            reference: body.reference,
-            amount: body.amount,
+            charge_id: gatewayId,
+            reference,
+            amount,
             currency: 'BRL',
             payment_method: 'pix',
             status: 'pending',
@@ -1412,7 +1419,8 @@ describe('Produtos da loja e acesso rápido ao Pix', () => {
       expect(decrypt((await receive(action))!.encryptedText)).toContain('Quanto deseja adicionar');
       await receive('25');
       expect(await db.payment.count()).toBe(1);
-      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+      expect(fetch.mock.calls.filter(([, options]) => options?.method !== 'POST')).toHaveLength(1);
       expect((await db.payment.findFirstOrThrow()).amountBrl.toFixed(2)).toBe('25.00');
       expect(await db.order.count()).toBe(0);
       expect(

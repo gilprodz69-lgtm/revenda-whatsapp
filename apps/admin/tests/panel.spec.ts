@@ -331,7 +331,11 @@ test('exclui produto somente após confirmar e atualiza a lista', async ({ page 
     fullPage: true,
     animations: 'disabled',
   });
+  const mutation = page.waitForRequest(
+    (req) => req.method() === 'DELETE' && req.url().endsWith('/products/authorized-product'),
+  );
   await dialog.getByRole('button', { name: 'Excluir produto', exact: true }).click();
+  expect((await mutation).headers()['content-type']).toBeUndefined();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText('Nenhum registro encontrado')).toBeVisible();
   expect(deletions).toHaveLength(1);
