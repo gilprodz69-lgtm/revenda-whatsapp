@@ -135,11 +135,30 @@ export async function processIncoming(eventId: string) {
           },
         })
       : null;
-    const stateBefore =
+    let stateBefore =
       current && current.expiresAt > new Date() ? stateSchema.parse(current.state) : null;
-    const active = !!stateBefore && stateBefore.step !== 'IDLE';
+    if (stateBefore?.step === 'MENU' && current) {
+      // Previous versions left MENU after the final Pix batch. Treat that batch
+      // as idle too, without clearing the existing payment or conversation.
+      const lastReply = await db.message.findFirst({
+        where: {
+          customerId: current.customerId,
+          instanceName: instance.name,
+          direction: 'OUT',
+          OR: [
+            { key: { startsWith: 'reply-' } },
+            { key: { startsWith: 'pix-code-' } },
+            { key: { startsWith: 'pix-qr-' } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { key: true },
+      });
+      if (lastReply?.key.startsWith('pix-')) stateBefore = { step: 'IDLE' };
+    }
+    const activeState = stateBefore?.step === 'IDLE' ? null : stateBefore;
     if (raw.startsWith('wa:')) {
-      const selected = resolveChoice(raw, active ? stateBefore.interaction : null);
+      const selected = resolveChoice(raw, activeState?.interaction);
       // Old menus never become quantities or confirmations in a different conversation step.
       if (selected === null) {
         await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
@@ -150,7 +169,7 @@ export async function processIncoming(eventId: string) {
     const trigger = matchesActivation(raw, await activationKeywords());
     const input = normalizedInput(raw);
     const humanActive = !!existingCustomer?.humanUntil && existingCustomer.humanUntil > new Date();
-    if (!trigger && !humanActive && (!active || !acceptsStepInput(stateBefore!, input))) {
+    if (!trigger && !humanActive && (!activeState || !acceptsStepInput(activeState, input))) {
       await db.webhookEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
       return;
     }

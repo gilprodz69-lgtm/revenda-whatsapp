@@ -1626,6 +1626,43 @@ describe('Expay Brasil', () => {
       expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({ step: 'PROVIDERS' });
     },
   );
+  it('protege Pix de versões anteriores sem apagar a sessão e permite navegar após reativação', async () => {
+    await configured();
+    await saveSetting('bot.activationKeywords', ['abrir']);
+    const fetch = mockPixCharge();
+    await receivePix('abrir');
+    await receivePix('3');
+    await receivePix('10');
+    const legacyState = {
+      step: 'MENU',
+      interaction: { token: 'old-pix', values: ['0', '3', '5'] },
+    };
+    await db.conversation.updateMany({ data: { state: legacyState } });
+    const conversation = await db.conversation.findFirstOrThrow();
+    const count = await db.message.count();
+    for (const text of [
+      'Top, já usei um bot parecido',
+      'paguei',
+      '1',
+      '3',
+      '0',
+      'saldo',
+      'pix',
+      'wa:old-pix:3',
+    ])
+      await receivePix(text);
+    expect(await db.message.count()).toBe(count);
+    expect((await db.conversation.findFirstOrThrow()).state).toEqual(legacyState);
+    expect((await db.conversation.findFirstOrThrow()).expiresAt).toEqual(conversation.expiresAt);
+    expect(await db.payment.count()).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await receivePix('ABRIR!');
+    await receivePix('3');
+    expect((await db.conversation.findFirstOrThrow()).state).toMatchObject({
+      step: 'DEPOSIT_AMOUNT',
+    });
+    expect(await db.payment.count()).toBe(1);
+  });
   it.each(['interactive', 'text'])(
     'gera após o valor e envia copia e cola sozinho em modo %s',
     async (style) => {
